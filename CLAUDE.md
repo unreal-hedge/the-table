@@ -30,6 +30,12 @@ npx tsx test-engine.ts
 
 200 random hands with timeouts, sit-outs, rebuys, all-ins. Asserts after EVERY action: stacks + bets + pots == total bought in, and the ledger nets to zero. If you touch the engine and this fails, you broke chip conservation.
 
+## Verification — real browser, not just compilers
+
+- **Every step that touches CSS or components ends with a real-browser screenshot check at desktop width AND 375px** before the step is called done. "Compiles" is not "renders" — the CSS pipeline can break while the build stays green.
+- **Never run `next build` while the dev server is running** — they share `.next`, and the build deletes the dev server's assets (fresh loads then 404 into unstyled bare HTML while hot-reloaded tabs keep looking fine). Local verification builds use `npm run build:check` (separate `.next-check` dir); plain `npm run build` is for CI/Vercel.
+- After config or structure changes (tsconfig paths, next.config, moving folders), **restart the dev server** — it caches module resolution and will serve a stale graph indefinitely.
+
 ## Conventions
 
 - Chips are abstract points (spec 3.1), formatted with `fmt()` (en-IN locale).
