@@ -1,0 +1,39 @@
+diff --git a/node_modules/poker-ts/dist/lib/dealer.js b/node_modules/poker-ts/dist/lib/dealer.js
+index f51d9e3..b45fb0f 100644
+--- a/node_modules/poker-ts/dist/lib/dealer.js
++++ b/node_modules/poker-ts/dist/lib/dealer.js
+@@ -67,6 +67,7 @@ var Dealer = /** @class */ (function () {
+         this._roundOfBetting = community_cards_1.RoundOfBetting.PREFLOP;
+         this._bettingRoundsCompleted = false;
+         this._players = players;
++        this._allPlayers = players; // PATCH: preserved full array so all-in winners can be paid at showdown
+         this._button = button;
+         this._forcedBets = forcedBets;
+         this._deck = deck;
+@@ -249,7 +250,7 @@ var Dealer = /** @class */ (function () {
+         if (this._potManager.pots().length === 1 && this._potManager.pots()[0].eligiblePlayers().length === 1) {
+             // No need to evaluate the hand. There is only one player.
+             var index = this._potManager.pots()[0].eligiblePlayers()[0];
+-            var player = this._players[index];
++            var player = this._allPlayers[index]; // PATCH
+             assert_1.default(player !== null);
+             player.addToStack(this._potManager.pots()[0].size());
+             return;
+@@ -276,7 +277,7 @@ var Dealer = /** @class */ (function () {
+             winningPlayerResults.forEach(function (playerResult) {
+                 var _a;
+                 var seatIndex = playerResult[0];
+-                (_a = _this._players[seatIndex]) === null || _a === void 0 ? void 0 : _a.addToStack(payout);
++                (_a = _this._allPlayers[seatIndex]) === null || _a === void 0 ? void 0 : _a.addToStack(payout); // PATCH
+             });
+             this_1._winners.push(winningPlayerResults.map(function (playerResult) {
+                 var seatIndex = playerResult[0];
+@@ -288,7 +289,7 @@ var Dealer = /** @class */ (function () {
+                 var winners_1 = new Array(this_1._players.length).fill(null);
+                 winningPlayerResults.forEach(function (playerResult) {
+                     var seatIndex = playerResult[0];
+-                    winners_1[seatIndex] = _this._players[seatIndex];
++                    winners_1[seatIndex] = _this._allPlayers[seatIndex]; // PATCH
+                 });
+                 var seat = this_1._button;
+                 while (oddChips !== 0) {

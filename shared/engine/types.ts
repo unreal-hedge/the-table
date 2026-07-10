@@ -1,0 +1,121 @@
+// ============================================================
+// SHARED TYPES — the contract between the engine and any UI.
+// The 2D UI, the future 3D UI, and the future multiplayer
+// server ALL speak in these types. Keep this file UI-free.
+// ============================================================
+
+export interface Card {
+  rank: "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "T" | "J" | "Q" | "K" | "A";
+  suit: "clubs" | "diamonds" | "hearts" | "spades";
+}
+
+export type BettingRound = "preflop" | "flop" | "turn" | "river";
+
+export type PlayerAction = "fold" | "check" | "call" | "bet" | "raise";
+
+export interface GameConfig {
+  smallBlind: number;      // Parth spec 4.1 — cash default 100
+  bigBlind: number;        // 200
+  defaultBuyIn: number;    // 3.2 — 1000
+  minBuyIn: number;        // 3.3 — 500
+  maxBuyIn: number;        // 3.3 — 50000
+  actionTimeSec: number;   // 5.1 — 30
+  timeBankSec: number;     // 5.2 — 30, refills +5/hand up to cap
+}
+
+export const DEFAULT_CONFIG: GameConfig = {
+  smallBlind: 100,
+  bigBlind: 200,
+  defaultBuyIn: 1000,
+  minBuyIn: 500,
+  maxBuyIn: 50000,
+  actionTimeSec: 30,
+  timeBankSec: 30,
+};
+
+/** A person at the table, as the engine tracks them across hands. */
+export interface PlayerRecord {
+  id: string;
+  name: string;
+  seat: number;            // fixed seat index 0..7
+  stack: number;           // current chips (synced from table after each hand)
+  buyInTotal: number;      // ledger: everything they've put in (3.6)
+  sittingOut: boolean;     // 6.x
+  consecutiveTimeouts: number; // 2 in a row => auto sit-out (6.1)
+  timeBank: number;        // seconds remaining (5.2)
+  pendingAddChips: number; // approved rebuys applied between hands (3.4)
+}
+
+/** What the UI needs to draw one seat. */
+export interface SeatView {
+  seat: number;
+  id: string;
+  name: string;
+  stack: number;
+  betSize: number;          // chips in front of them this round
+  inHand: boolean;          // dealt in and not folded
+  folded: boolean;
+  sittingOut: boolean;
+  isButton: boolean;
+  isTurn: boolean;
+  holeCards: Card[] | null; // engine always includes them in hot-seat mode;
+                            // in multiplayer (1b) the server strips these per-viewer
+  revealed: boolean;        // face-up (showdown / voluntary show)
+  lastAction: string | null; // "RAISE 600", "FOLD" — the Pokerist-style badge
+  timeBank: number;
+}
+
+export type Phase =
+  | "lobby"        // configuring, not started
+  | "inHand"       // betting in progress
+  | "handEnded"    // showing results, waiting for next deal
+  | "paused"       // host paused (7.2)
+  | "ended";       // session stopped, ledger final (7.3)
+
+export interface PotView {
+  size: number;
+  eligibleSeats: number[];
+}
+
+export interface HandResultShare {
+  seat: number;
+  name: string;
+  amountWon: number;
+  handName: string | null;  // "Full house" — null when everyone folded
+  cards: Card[] | null;     // best five, when known
+}
+
+export interface GameState {
+  phase: Phase;
+  handNumber: number;
+  config: GameConfig;
+  seats: SeatView[];
+  communityCards: Card[];
+  pots: PotView[];
+  totalPot: number;
+  round: BettingRound | null;
+  playerToAct: number | null;       // seat index
+  legalActions: PlayerAction[] | null;
+  betRange: { min: number; max: number } | null;
+  callAmount: number;               // chips needed to call for actor
+  turnStartedAt: number | null;     // ms epoch — UI runs the visible countdown
+  turnDeadlineAt: number | null;    // ms epoch, extends when time bank used
+  lastHandResult: HandResultShare[] | null;
+  log: string[];                    // dealer log, newest last
+  canShowSeat: number | null;       // fold-win: this seat may voluntarily show (9.1)
+}
+
+/** Ledger rows (3.6). */
+export interface LedgerRow {
+  id: string;
+  name: string;
+  buyInTotal: number;
+  stack: number;
+  net: number;
+}
+
+export interface SessionSummary {
+  endedAt: number;
+  handsPlayed: number;
+  rows: LedgerRow[];
+}
