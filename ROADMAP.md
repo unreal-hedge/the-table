@@ -1,6 +1,6 @@
 # The Table — Build Roadmap
 
-> ⚠️ **Provisional join is insecure until Step 5 — do not share the room link with the group before then.** (Anyone who knows a playerId — including "kabir"/"parth", which carry host powers — can claim that identity. Keyword login in Step 5 replaces this.)
+> Login is keyword-based as of Step 5 (name + keyword per player, host-configured). One rule to know: **the first person into a fresh room becomes its host** — join your room before sharing the link, and re-claim it first if the server ever restarts.
 
 The plan, phase by phase. **Every phase has a gate**: engine test passes (`npx tsx test-engine.ts`) + `npm run build` clean + Kabir playtests and says **"gate passed"** before the next phase starts. Never build two phases in one go. Checkboxes get updated as work lands.
 
@@ -21,9 +21,9 @@ Goal: friends join from their own phones/laptops via one shared link. Server is 
 - [x] **Protocol** — DONE. `shared/protocol.ts` (wire contract, co-owned like types.ts); `party/filter.ts` strips other players' un-revealed holeCards per viewer; `party/server.ts` is the authoritative host. Server verifies every `act` (connection → playerId → seat must equal playerToAct) and `host` command (host ids only) — the client's word is never trusted. Chat relay w/ last-50 buffer included. Patched poker-ts verified present in the worker bundle.
   - [x] Acceptance (code level): `npx tsx test-filter.ts` — 80 hands, 20k+ strip assertions after every action, showdown reveals still visible. Live devtools check happens at the phase gate.
 - [x] **Client online mode** — DONE. Lobby has Local / Online tabs; online joins a room (name-based provisional login) and renders server-pushed state through the same TableView as hot-seat. Connection pill (connected/reconnecting/disconnected) + "in room: [names]" presence line always visible; a dropped connection shows a full-screen veil, never a silent freeze; stale state after a server restart clears via `noGame`. Verified live in-browser vs a headless bot, plus `test-online.ts`: 3 headless clients, 10 real hands over websockets — card stripping on the wire, out-of-turn acts and non-host commands rejected, ledger nets 0. Also hardened: host `dealNext` is refused mid-hand (would have destroyed the live pot).
-- [ ] **Login** — one shared room link + per-person keyword. Host (Kabir/Parth keywords) configures players + keywords in the lobby.
-  - [ ] Re-login with your keyword from another device takes over your seat mid-hand (spec 8.2).
-  - [ ] 2-minute disconnect grace before a player counts as gone.
+- [x] **Login** — DONE. Room roster on the server: first join claims a fresh room (creator = host, sets own keyword); host's start form registers every player's name + keyword (+ co-host flags). Auth failures are byte-identical ("Invalid login") whether the name exists or not. Host authority comes from the roster, never the client.
+  - [x] Re-login from another device takes over your seat mid-hand (spec 8.2) — old connection gets a visible "You logged in on another device" screen and is closed; never two live connections per seat. Verified in E2E (0 post-kick leaks) + live in browser incl. the rejoin path.
+  - [ ] 2-minute disconnect grace before a player counts as gone. *(Step 7)*
 - [ ] **Server-owned clock** — server owns the 30s action clock + time bank; client countdowns are display only.
 - [ ] **Rathole prevention (spec 3.5)** — leave and rejoin the same session → must re-enter with at least the stack you left with (capped at max buy-in).
 - [ ] **Text chat** — simple room chat: small bubbles near the sender's seat for a few seconds + in the log strip. Keep last ~50 messages.

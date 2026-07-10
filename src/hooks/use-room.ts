@@ -41,6 +41,9 @@ export interface RoomHandle {
   summary: SessionSummary | null; // set when the host ends the session
   lastError: string | null;    // most recent server rejection, if any
   mySeat: number | null;
+  isHost: boolean;             // server-confirmed (roster), not client-guessed
+  kicked: boolean;             // seat taken over from another device (8.2)
+  rejoin: () => void;          // deliberate re-login (kicks the other device back)
   send: {
     act: (action: PlayerAction, amount?: number) => void;
     show: () => void;
@@ -49,7 +52,7 @@ export interface RoomHandle {
   };
 }
 
-export function useRoom(room: string, myId: string): RoomHandle {
+export function useRoom(room: string, myId: string, keyword: string): RoomHandle {
   const socketRef = useRef<PartySocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [members, setMembers] = useState<PresenceMember[]>([]);
@@ -58,6 +61,10 @@ export function useRoom(room: string, myId: string): RoomHandle {
   const [chat, setChat] = useState<ChatEntry[]>([]);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [kicked, setKicked] = useState(false);
+  // bumping this remounts the socket — used by rejoin() after a kick
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const socket = new PartySocket({
@@ -67,16 +74,20 @@ export function useRoom(room: string, myId: string): RoomHandle {
     });
     socketRef.current = socket;
     let downTimer: ReturnType<typeof setTimeout> | null = null;
+    let wasKicked = false;
 
     const onOpen = () => {
       if (downTimer) { clearTimeout(downTimer); downTimer = null; }
       setStatus("connected");
       // (Re)announce identity on every connect — a reconnect is a new
       // socket, and the server maps identity per connection.
-      socket.send(JSON.stringify({ type: "join", playerId: myId } satisfies ClientMessage));
+      socket.send(JSON.stringify(
+        { type: "join", playerId: myId, keyword } satisfies ClientMessage
+      ));
     };
 
     const onClose = () => {
+      if (wasKicked) return; // deliberate close — no reconnect UX
       setStatus((prev) => (prev === "disconnected" ? prev : "reconnecting"));
       if (!downTimer) {
         downTimer = setTimeout(() => setStatus("disconnected"), DISCONNECTED_AFTER_MS);
@@ -95,7 +106,14 @@ export function useRoom(room: string, myId: string): RoomHandle {
         case "chatHistory": setChat(msg.entries); break;
         case "ended":       setSummary(msg.summary); break;
         case "error":       setLastError(msg.msg); break;
-        case "you":         break; // seat is derived from state below
+        case "you":         setIsHost(msg.host); break; // seat derives from state
+        case "kicked":
+          // another device took this seat — STOP reconnecting, or the
+          // two devices would kick each other in a loop
+          wasKicked = true;
+          setKicked(true);
+          socket.close();
+          break;
       }
     };
 
@@ -110,7 +128,7 @@ export function useRoom(room: string, myId: string): RoomHandle {
       socket.close();
       socketRef.current = null;
     };
-  }, [room, myId]);
+  }, [room, myId, keyword, attempt]);
 
   // auto-dismiss server rejections after a few seconds
   useEffect(() => {
@@ -120,6 +138,12 @@ export function useRoom(room: string, myId: string): RoomHandle {
   }, [lastError]);
 
   const mySeat = state?.seats.find((s) => s.id === myId)?.seat ?? null;
+
+  const rejoin = () => {
+    setKicked(false);
+    setStatus("connecting");
+    setAttempt((n) => n + 1); // remounts the socket → fresh join
+  };
 
   const send = useMemo(() => {
     const post = (msg: ClientMessage) => socketRef.current?.send(JSON.stringify(msg));
@@ -131,5 +155,8 @@ export function useRoom(room: string, myId: string): RoomHandle {
     };
   }, []);
 
-  return { status, members, state, ledger, chat, summary, lastError, mySeat, send };
+  return {
+    status, members, state, ledger, chat, summary, lastError, mySeat,
+    isHost, kicked, rejoin, send,
+  };
 }

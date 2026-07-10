@@ -14,7 +14,10 @@ import type {
 // ---------- client → server ----------
 
 export type ClientMessage =
-  | { type: "join"; playerId: string } // PROVISIONAL until Step 5 keyword login
+  // Login (spec 8.x): playerId + keyword must match the room roster.
+  // Bootstrap: the FIRST join in a fresh room claims it — that person
+  // becomes host and their keyword is registered as typed.
+  | { type: "join"; playerId: string; keyword: string }
   | { type: "act"; action: PlayerAction; amount?: number }
   | { type: "show" }                   // voluntary show after a fold-win (spec 9.1)
   | { type: "chat"; text: string }
@@ -28,16 +31,23 @@ export type HostCommand =
   | { kind: "sitOut"; playerId: string; out: boolean }     // (6.x)
   | { kind: "end" };      // finalize session + ledger (7.3)
 
-export interface StartingPlayer { id: string; name: string; buyIn: number }
+export interface StartingPlayer {
+  id: string;
+  name: string;
+  buyIn: number;
+  keyword?: string; // required by the server for online starts
+  host?: boolean;   // co-host flag (the room's creator is always host)
+}
 
 // ---------- server → client ----------
 
 export interface ChatEntry { from: string; text: string; at: number }
 
 export type ServerMessage =
-  | { type: "you"; playerId: string; seat: number | null } // seat null until seated
+  | { type: "you"; playerId: string; seat: number | null; host: boolean }
   | { type: "state"; state: GameState } // YOUR cards only; others stripped until revealed
   | { type: "noGame" } // join response when no game is running — clears any stale client state
+  | { type: "kicked" } // this connection lost its seat to a login from another device (8.2)
   | { type: "presence"; members: PresenceMember[] } // who's connected right now
   | { type: "ledger"; rows: LedgerRow[] } // session ledger (server-computed; engine stays untouched)
   | { type: "chat"; entry: ChatEntry }
@@ -48,11 +58,9 @@ export type ServerMessage =
 /** A live connection in the room (connected ≠ seated: spectators appear too). */
 export interface PresenceMember { id: string; name: string }
 
-// ---------- provisional identity (REPLACED in Step 5) ----------
-
-/** INSECURE placeholder: these playerIds carry host powers until
- *  keyword login lands in Step 5. See the warning atop ROADMAP.md. */
-export const PROVISIONAL_HOST_IDS: readonly string[] = ["kabir", "parth"];
-
 export const CHAT_HISTORY_LIMIT = 50; // keep the last ~50 messages (roadmap)
 export const CHAT_MAX_LENGTH = 200;   // sanity cap per message
+
+/** The one message a failed login ever gets — identical whether the
+ *  player id exists or not, so guessers learn nothing. */
+export const INVALID_LOGIN = "Invalid login";

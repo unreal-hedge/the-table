@@ -53,6 +53,13 @@ input { font: inherit; color: var(--text); }
 .player-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
 .player-row input[type="text"] { flex: 2; }
 .player-row input.buyin { flex: 1; }
+.player-row input.keyword { flex: 1.4; font-family: var(--font-mono), monospace; }
+.cohost-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.08em; cursor: pointer; white-space: nowrap;
+}
+.cohost-toggle input { accent-color: var(--glow); cursor: pointer; }
 .player-row input {
   background: rgba(242, 236, 221, 0.05); border: 1px solid var(--line);
   border-radius: 8px; padding: 9px 11px;

@@ -12,7 +12,6 @@
 
 import { useState } from "react";
 import { useRoom, ConnectionStatus } from "@/hooks/use-room";
-import { PROVISIONAL_HOST_IDS } from "@shared/protocol";
 import { GameSetupForm } from "./GameSetupForm";
 import { TableView } from "./TableView";
 import { EndScreen } from "./EndScreen";
@@ -20,6 +19,7 @@ import { EndScreen } from "./EndScreen";
 interface Props {
   room: string;
   myId: string;
+  keyword: string;
   onExit: () => void;
 }
 
@@ -41,11 +41,31 @@ function ConnPill({ status }: { status: ConnectionStatus }) {
   );
 }
 
-export function OnlineGame({ room, myId, onExit }: Props) {
-  const r = useRoom(room, myId);
+export function OnlineGame({ room, myId, keyword, onExit }: Props) {
+  const r = useRoom(room, myId, keyword);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
-  const isHost = PROVISIONAL_HOST_IDS.includes(myId);
+  const isHost = r.isHost; // server-confirmed via the roster, never guessed
   const memberNames = r.members.map((m) => m.name).join(", ") || "just you";
+
+  // ----- kicked: another device took this seat (spec 8.2) -----
+  if (r.kicked) {
+    return (
+      <div className="lobby">
+        <div className="lobby-card" style={{ textAlign: "center" }}>
+          <h1>Signed out <span className="suit">♠</span></h1>
+          <p className="sub" style={{ marginTop: 12 }}>
+            You logged in on another device — this screen gave up your seat.
+          </p>
+          <button className="primary-btn" onClick={r.rejoin}>
+            Log back in here instead
+          </button>
+          <button className="ghost-btn" style={{ marginTop: 12 }} onClick={onExit}>
+            Leave
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ----- session over -----
   if (r.summary && !summaryDismissed) {

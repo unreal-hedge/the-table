@@ -12,7 +12,7 @@ import { OnlineGame } from "@/components/OnlineGame";
 type Screen =
   | { kind: "lobby" }
   | { kind: "local"; config: GameConfig; players: SetupPlayer[] }
-  | { kind: "online"; room: string; myId: string };
+  | { kind: "online"; room: string; myId: string; keyword: string };
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>({ kind: "lobby" });
@@ -22,12 +22,15 @@ export default function Home() {
     case "local":
       return <LocalGame config={screen.config} players={screen.players} onExit={toLobby} />;
     case "online":
-      return <OnlineGame room={screen.room} myId={screen.myId} onExit={toLobby} />;
+      return (
+        <OnlineGame room={screen.room} myId={screen.myId} keyword={screen.keyword}
+          onExit={toLobby} />
+      );
     default:
       return (
         <Lobby
           onStartLocal={(config, players) => setScreen({ kind: "local", config, players })}
-          onJoinOnline={(room, myId) => setScreen({ kind: "online", room, myId })}
+          onJoinOnline={(room, myId, keyword) => setScreen({ kind: "online", room, myId, keyword })}
         />
       );
   }

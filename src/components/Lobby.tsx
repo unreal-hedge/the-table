@@ -21,13 +21,14 @@ export function appendOverall(s: SessionSummary) {
 
 interface Props {
   onStartLocal: (config: GameConfig, players: SetupPlayer[]) => void;
-  onJoinOnline: (room: string, myId: string) => void;
+  onJoinOnline: (room: string, myId: string, keyword: string) => void;
 }
 
 export function Lobby({ onStartLocal, onJoinOnline }: Props) {
   const [tab, setTab] = useState<"local" | "online">("local");
   const [room, setRoom] = useState("");
   const [name, setName] = useState("");
+  const [keyword, setKeyword] = useState("");
   const [overall, setOverall] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -37,9 +38,14 @@ export function Lobby({ onStartLocal, onJoinOnline }: Props) {
     setOverall(totals);
   }, []);
 
-  const joinValid = room.trim().length >= 2 && name.trim().length >= 2;
+  const joinValid =
+    room.trim().length >= 2 && name.trim().length >= 2 && keyword.trim().length >= 2;
   const join = () =>
-    onJoinOnline(room.trim().toLowerCase(), name.trim().toLowerCase());
+    onJoinOnline(
+      room.trim().toLowerCase(),
+      name.trim().toLowerCase(),
+      keyword.trim().toLowerCase()
+    );
 
   return (
     <div className="lobby">
@@ -72,12 +78,16 @@ export function Lobby({ onStartLocal, onJoinOnline }: Props) {
                   onChange={(e) => setRoom(e.target.value)} /></div>
               <div className="field"><label>Your name</label>
                 <input type="text" placeholder="kabir" value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => setName(e.target.value)} /></div>
+              <div className="field"><label>Keyword</label>
+                <input type="password" placeholder="secret word" value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && joinValid) join(); }} /></div>
             </div>
             <p className="form-hint">
-              Everyone types the same room name. The host starts the game once
-              everyone&apos;s in. (Name-based login is temporary — keywords come in Step 5.)
+              First person into a fresh room becomes host — their keyword is set
+              by this login. Everyone else needs the name + keyword the host
+              configured. Logging in from a new device takes your seat with you.
             </p>
             <button className="primary-btn" disabled={!joinValid} onClick={join}>
               Join room

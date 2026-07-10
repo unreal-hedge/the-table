@@ -27,7 +27,7 @@ import type { GameState } from "../shared/engine/types";
 import { filterStateFor } from "./filter";
 import {
   ClientMessage, ServerMessage, HostCommand, ChatEntry, PresenceMember,
-  PROVISIONAL_HOST_IDS, CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH,
+  CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH, INVALID_LOGIN,
 } from "../shared/protocol";
 
 /** Cloudflare bindings available to the worker. The Durable Object
@@ -50,6 +50,11 @@ export class TableServer extends Server<Env> {
   /** connection.id → playerId. THE identity map — every permission
    *  check goes through this, never through fields in the message. */
   private joined = new Map<string, string>();
+  /** The room's login book: playerId → credentials + host flag.
+   *  Bootstrap: first join in a fresh room claims it (creator = host);
+   *  afterwards only the host's start form adds/updates entries. */
+  private roster = new Map<string, { name: string; keyword: string; host: boolean }>();
+  private creatorId: string | null = null;
   private chat: ChatEntry[] = [];
   private dealTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -57,7 +62,7 @@ export class TableServer extends Server<Env> {
 
   onConnect(conn: Connection) {
     // No identity yet — everything but "join" is rejected until they join.
-    this.send(conn, { type: "you", playerId: "", seat: null });
+    this.send(conn, { type: "you", playerId: "", seat: null, host: false });
   }
 
   onClose(conn: Connection) {
@@ -80,7 +85,7 @@ export class TableServer extends Server<Env> {
       return this.error(conn, "Malformed message");
     }
 
-    if (msg.type === "join") return this.handleJoin(conn, msg.playerId);
+    if (msg.type === "join") return this.handleJoin(conn, msg.playerId, msg.keyword);
 
     // Everything below requires an established identity.
     const playerId = this.joined.get(conn.id);
@@ -95,11 +100,42 @@ export class TableServer extends Server<Env> {
     }
   }
 
-  private handleJoin(conn: Connection, playerId: string) {
+  private handleJoin(conn: Connection, playerId: string, keyword: string) {
     const id = String(playerId ?? "").trim().toLowerCase();
-    if (!id || id.length > 40) return this.error(conn, "Invalid player id");
+    const kw = String(keyword ?? "").trim().toLowerCase();
+
+    // SECURITY: every rejection below is the same message — an attacker
+    // must never learn whether the name exists (Kabir's condition 2).
+    if (!id || id.length > 40 || !kw || kw.length > 40) {
+      return this.error(conn, INVALID_LOGIN);
+    }
+
+    if (this.roster.size === 0) {
+      // fresh room — the first join claims it and becomes host
+      this.roster.set(id, { name: id, keyword: kw, host: true });
+      this.creatorId = id;
+      this.pushLogQuiet(`room claimed by ${id}`);
+    } else {
+      const entry = this.roster.get(id);
+      if (!entry || entry.keyword !== kw) return this.error(conn, INVALID_LOGIN);
+    }
+
+    // Takeover (spec 8.2): a correct login always wins the seat. Any
+    // other live connection holding this identity is told why and cut —
+    // never two live connections on one seat (Kabir's condition 1).
+    for (const other of this.getConnections()) {
+      if (other.id !== conn.id && this.joined.get(other.id) === id) {
+        this.send(other, { type: "kicked" });
+        this.joined.delete(other.id);
+        other.close(1000, "logged in elsewhere");
+      }
+    }
+
     this.joined.set(conn.id, id);
-    this.send(conn, { type: "you", playerId: id, seat: this.seatOf(id) });
+    this.send(conn, {
+      type: "you", playerId: id, seat: this.seatOf(id),
+      host: this.roster.get(id)?.host ?? false,
+    });
     this.send(conn, { type: "chatHistory", entries: this.chat });
     if (this.gm) {
       this.send(conn, {
@@ -173,9 +209,9 @@ export class TableServer extends Server<Env> {
   }
 
   private handleHost(conn: Connection, playerId: string, cmd: HostCommand) {
-    // CONDITION 1 (Kabir): host commands only from host connections.
-    // PROVISIONAL identity until Step 5 — see ROADMAP warning.
-    if (!PROVISIONAL_HOST_IDS.includes(playerId)) {
+    // Host commands only from connections whose ROSTER entry says host —
+    // identity from the connection map, authority from the roster.
+    if (!this.roster.get(playerId)?.host) {
       return this.error(conn, "Host only");
     }
 
@@ -184,6 +220,26 @@ export class TableServer extends Server<Env> {
         if (this.gm && this.gm.state().phase !== "ended") {
           return this.error(conn, "A session is already running");
         }
+        // Register every player's login before the game exists: upsert
+        // roster entries (never delete — spectators keep their logins).
+        for (const p of cmd.players) {
+          const kw = String(p.keyword ?? "").trim().toLowerCase();
+          if (!kw) return this.error(conn, `Player "${p.name}" needs a keyword`);
+        }
+        for (const p of cmd.players) {
+          const kw = String(p.keyword ?? "").trim().toLowerCase();
+          const existing = this.roster.get(p.id);
+          this.roster.set(p.id, {
+            name: p.name,
+            keyword: kw,
+            host: !!p.host || existing?.host === true,
+          });
+        }
+        // the creator can never lock themselves out of hosting
+        if (this.creatorId) {
+          const c = this.roster.get(this.creatorId);
+          if (c) c.host = true;
+        }
         try {
           this.gm = new GameManager(cmd.config, cmd.players);
           this.gm.start();
@@ -191,6 +247,15 @@ export class TableServer extends Server<Env> {
           console.error(`[TableServer] start failed:`, e);
           this.gm = null;
           return this.error(conn, "Could not start the game");
+        }
+        // roster (and host flags) may have changed — refresh everyone's "you"
+        for (const c of this.getConnections()) {
+          const pid = this.joined.get(c.id);
+          if (pid === undefined) continue;
+          this.send(c, {
+            type: "you", playerId: pid, seat: this.seatOf(pid),
+            host: this.roster.get(pid)?.host ?? false,
+          });
         }
         break;
       }
@@ -281,7 +346,11 @@ export class TableServer extends Server<Env> {
       const seat = this.gm.state().seats.find((s) => s.id === playerId);
       if (seat) return seat.name;
     }
-    return playerId; // spectators chat under their id
+    return this.roster.get(playerId)?.name ?? playerId;
+  }
+
+  private pushLogQuiet(msg: string) {
+    console.log(`[TableServer:${this.name}] ${msg}`);
   }
 
   private send(conn: Connection, msg: ServerMessage) {
