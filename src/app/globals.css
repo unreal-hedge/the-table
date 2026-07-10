@@ -73,6 +73,52 @@ input { font: inherit; color: var(--text); }
 .overall-ledger { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 14px; }
 .overall-ledger .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
 
+/* ============ MODE TABS (lobby) ============ */
+.mode-tabs { display: flex; gap: 8px; margin-bottom: 4px; }
+.mode-tab {
+  flex: 1; padding: 11px; border: 1px solid var(--line); border-radius: 10px;
+  color: var(--muted); font-weight: 600; font-size: 14px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.mode-tab:hover { color: var(--text); }
+.mode-tab.active {
+  color: var(--text); border-color: rgba(91, 224, 138, 0.55);
+  background: rgba(91, 224, 138, 0.06);
+}
+.form-hint { font-size: 12.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+.form-hint.error { color: var(--danger); }
+.waiting-note { color: var(--muted); margin: 26px 0 8px; font-size: 15px; }
+
+/* ============ CONNECTION STATUS (online) ============ */
+.net-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 10px; }
+.net-corner {
+  position: absolute; top: 74px; left: 23px; z-index: 6;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
+.conn-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; padding: 4px 12px; border-radius: 20px;
+  border: 1px solid var(--line); background: var(--plate);
+  backdrop-filter: blur(4px); white-space: nowrap;
+}
+.conn-pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+.conn-pill.ok .dot { background: var(--glow); box-shadow: 0 0 6px rgba(91, 224, 138, 0.7); }
+.conn-pill.warn .dot { background: var(--gold); animation: connPulse 1s ease infinite; }
+.conn-pill.bad .dot { background: var(--danger); animation: connPulse 0.6s ease infinite; }
+.conn-pill.warn { border-color: rgba(217, 164, 65, 0.45); }
+.conn-pill.bad { border-color: rgba(224, 100, 91, 0.55); color: var(--danger); }
+@keyframes connPulse { 50% { opacity: 0.3; } }
+.room-line {
+  font-size: 12px; color: var(--muted); background: var(--plate);
+  padding: 3px 10px; border-radius: 12px; border: 1px solid var(--line);
+}
+.err-toast {
+  position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
+  background: rgba(224, 100, 91, 0.14); border: 1px solid rgba(224, 100, 91, 0.5);
+  color: var(--danger); padding: 8px 18px; border-radius: 10px;
+  font-size: 13px; z-index: 30; animation: badgeIn 0.18s ease both;
+}
+
 /* ============ TABLE SCENE ============ */
 .scene { position: relative; height: 100vh; width: 100vw; }
 .table-wrap {

@@ -8,7 +8,7 @@
 // ============================================================
 
 import type {
-  GameConfig, GameState, PlayerAction, SessionSummary,
+  GameConfig, GameState, LedgerRow, PlayerAction, SessionSummary,
 } from "./engine/types";
 
 // ---------- client → server ----------
@@ -37,10 +37,16 @@ export interface ChatEntry { from: string; text: string; at: number }
 export type ServerMessage =
   | { type: "you"; playerId: string; seat: number | null } // seat null until seated
   | { type: "state"; state: GameState } // YOUR cards only; others stripped until revealed
+  | { type: "noGame" } // join response when no game is running — clears any stale client state
+  | { type: "presence"; members: PresenceMember[] } // who's connected right now
+  | { type: "ledger"; rows: LedgerRow[] } // session ledger (server-computed; engine stays untouched)
   | { type: "chat"; entry: ChatEntry }
   | { type: "chatHistory"; entries: ChatEntry[] } // sent once on join
   | { type: "ended"; summary: SessionSummary }
   | { type: "error"; msg: string }; // "not your turn", "host only", …
+
+/** A live connection in the room (connected ≠ seated: spectators appear too). */
+export interface PresenceMember { id: string; name: string }
 
 // ---------- provisional identity (REPLACED in Step 5) ----------
 

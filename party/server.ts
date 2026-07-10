@@ -26,7 +26,7 @@ import { GameManager } from "../shared/engine/manager";
 import type { GameState } from "../shared/engine/types";
 import { filterStateFor } from "./filter";
 import {
-  ClientMessage, ServerMessage, HostCommand, ChatEntry,
+  ClientMessage, ServerMessage, HostCommand, ChatEntry, PresenceMember,
   PROVISIONAL_HOST_IDS, CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH,
 } from "../shared/protocol";
 
@@ -65,6 +65,7 @@ export class TableServer extends Server<Env> {
     // mapping. Their seat/stack live in the GameManager, so rejoining
     // with the same playerId picks the seat right back up.
     this.joined.delete(conn.id);
+    this.broadcastPresence();
   }
 
   // ---------- message handling ----------
@@ -105,7 +106,13 @@ export class TableServer extends Server<Env> {
         type: "state",
         state: filterStateFor(this.gm.state(), this.seatOf(id)),
       });
+      this.send(conn, { type: "ledger", rows: this.gm.ledger() });
+    } else {
+      // explicit "nothing running" — without it, a client reconnecting
+      // after a server restart would render its stale pre-crash state
+      this.send(conn, { type: "noGame" });
     }
+    this.broadcastPresence();
   }
 
   private handleAct(
@@ -188,7 +195,16 @@ export class TableServer extends Server<Env> {
         break;
       }
       case "pause":    this.gm?.togglePause(); break;
-      case "dealNext": this.gm?.dealNextHand(); break;
+      case "dealNext": {
+        // engine's dealNextHand() trusts its caller on timing — dealing
+        // MID-hand would rebuild the table and destroy the live pot.
+        // The hot-seat UI can't misfire this; a remote client could.
+        if (this.gm?.state().phase !== "handEnded") {
+          return this.error(conn, "Can't deal now");
+        }
+        this.gm.dealNextHand();
+        break;
+      }
       case "addChips": this.gm?.approveAddChips(cmd.playerId, cmd.amount); break;
       case "sitOut":   this.gm?.toggleSitOut(cmd.playerId, cmd.out); break;
       case "end": {
@@ -210,6 +226,7 @@ export class TableServer extends Server<Env> {
     if (!this.gm) return;
     const base = this.gm.state();
     this.broadcastState(base);
+    this.broadcastMsg({ type: "ledger", rows: this.gm.ledger() });
 
     if (this.dealTimer) { clearTimeout(this.dealTimer); this.dealTimer = null; }
     if (base.phase === "handEnded") {
@@ -237,6 +254,19 @@ export class TableServer extends Server<Env> {
     for (const conn of this.getConnections()) {
       if (this.joined.has(conn.id)) this.send(conn, msg);
     }
+  }
+
+  /** Who's connected right now — deduped (a player may briefly hold
+   *  two sockets during a device switch). */
+  private broadcastPresence() {
+    const seen = new Set<string>();
+    const members: PresenceMember[] = [];
+    for (const id of this.joined.values()) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      members.push({ id, name: this.nameOf(id) });
+    }
+    this.broadcastMsg({ type: "presence", members });
   }
 
   // ---------- helpers ----------

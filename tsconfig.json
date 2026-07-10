@@ -25,6 +25,9 @@
       "@/engine/*": [
         "./shared/engine/*"
       ],
+      "@shared/*": [
+        "./shared/*"
+      ],
       "@/*": [
         "./src/*"
       ]

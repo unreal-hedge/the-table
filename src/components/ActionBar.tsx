@@ -5,11 +5,15 @@ import { fmt } from "@/engine/manager";
 
 interface Props {
   state: GameState;
+  /** false = it's not this viewer's turn (online mode) — buttons stay
+   *  visible but inert, so the bar never "disappears" mid-game. */
+  enabled?: boolean;
   onAct: (a: "fold" | "check" | "call" | "bet" | "raise", amount?: number) => void;
-  onTimeBank: () => void;
+  /** absent → time-bank button hidden (online until the server owns the clock) */
+  onTimeBank?: () => void;
 }
 
-export function ActionBar({ state: s, onAct, onTimeBank }: Props) {
+export function ActionBar({ state: s, enabled = true, onAct, onTimeBank }: Props) {
   const legal = s.legalActions ?? [];
   const range = s.betRange;
   const [amount, setAmount] = useState(0);
@@ -19,7 +23,7 @@ export function ActionBar({ state: s, onAct, onTimeBank }: Props) {
     if (range) setAmount(range.min);
   }, [s.playerToAct, s.round]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canAct = s.phase === "inHand" && legal.length > 0;
+  const canAct = enabled && s.phase === "inHand" && legal.length > 0;
   const aggr: "bet" | "raise" | null =
     legal.includes("raise") ? "raise" : legal.includes("bet") ? "bet" : null;
   const actorSeat = s.seats.find((x) => x.isTurn);
@@ -48,10 +52,12 @@ export function ActionBar({ state: s, onAct, onTimeBank }: Props) {
       </div>
 
       <div className="ab-right">
-        <button className="timebank-btn" disabled={!canAct || !actorSeat || actorSeat.timeBank <= 0}
-          onClick={onTimeBank} title="Use time bank">
-          +{actorSeat?.timeBank ?? 0}s
-        </button>
+        {onTimeBank && (
+          <button className="timebank-btn" disabled={!canAct || !actorSeat || actorSeat.timeBank <= 0}
+            onClick={onTimeBank} title="Use time bank">
+            +{actorSeat?.timeBank ?? 0}s
+          </button>
+        )}
         {aggr && range && (
           <div className="raise-box">
             <input

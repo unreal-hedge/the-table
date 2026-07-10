@@ -1,11 +1,14 @@
 "use client";
+// Entry screen. Two ways to play:
+//   Local  — hot-seat on this device (phase 1a, our debug harness)
+//   Online — join a room on the game server (phase 1b)
+// Also shows the overall (cross-session) ledger from localStorage
+// until it moves to Supabase in phase 1b.2.
+
 import { useEffect, useState } from "react";
-import { DEFAULT_CONFIG, GameConfig, SessionSummary } from "@/engine/types";
+import { GameConfig, SessionSummary } from "@/engine/types";
 import { fmt } from "@/engine/manager";
-
-export interface LobbyPlayer { id: string; name: string; buyIn: number }
-
-interface Props { onStart: (config: GameConfig, players: LobbyPlayer[]) => void }
+import { GameSetupForm, SetupPlayer } from "./GameSetupForm";
 
 const OVERALL_KEY = "poker-overall-ledger";
 
@@ -16,12 +19,15 @@ export function appendOverall(s: SessionSummary) {
   localStorage.setItem(OVERALL_KEY, JSON.stringify([...readOverall(), s]));
 }
 
-export function Lobby({ onStart }: Props) {
-  const [cfg, setCfg] = useState<GameConfig>(DEFAULT_CONFIG);
-  const [players, setPlayers] = useState<LobbyPlayer[]>([
-    { id: "p1", name: "Kabir", buyIn: 1000 },
-    { id: "p2", name: "Parth", buyIn: 1000 },
-  ]);
+interface Props {
+  onStartLocal: (config: GameConfig, players: SetupPlayer[]) => void;
+  onJoinOnline: (room: string, myId: string) => void;
+}
+
+export function Lobby({ onStartLocal, onJoinOnline }: Props) {
+  const [tab, setTab] = useState<"local" | "online">("local");
+  const [room, setRoom] = useState("");
+  const [name, setName] = useState("");
   const [overall, setOverall] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -31,8 +37,9 @@ export function Lobby({ onStart }: Props) {
     setOverall(totals);
   }, []);
 
-  const valid = players.length >= 2 && players.every((p) => p.name.trim() && p.buyIn >= cfg.minBuyIn && p.buyIn <= cfg.maxBuyIn);
-  const num = (v: string) => Math.max(0, Number(v) || 0);
+  const joinValid = room.trim().length >= 2 && name.trim().length >= 2;
+  const join = () =>
+    onJoinOnline(room.trim().toLowerCase(), name.trim().toLowerCase());
 
   return (
     <div className="lobby">
@@ -40,50 +47,50 @@ export function Lobby({ onStart }: Props) {
         <h1>The Table <span className="suit">♠</span></h1>
         <p className="sub">Private cash game · No-Limit Hold&apos;em · chips are points, settle up after</p>
 
-        <h2>Game settings</h2>
-        <div className="field-row">
-          <div className="field"><label>Small blind</label>
-            <input type="number" value={cfg.smallBlind} onChange={(e) => setCfg({ ...cfg, smallBlind: num(e.target.value) })} /></div>
-          <div className="field"><label>Big blind</label>
-            <input type="number" value={cfg.bigBlind} onChange={(e) => setCfg({ ...cfg, bigBlind: num(e.target.value) })} /></div>
-          <div className="field"><label>Min buy-in</label>
-            <input type="number" value={cfg.minBuyIn} onChange={(e) => setCfg({ ...cfg, minBuyIn: num(e.target.value) })} /></div>
-          <div className="field"><label>Max buy-in</label>
-            <input type="number" value={cfg.maxBuyIn} onChange={(e) => setCfg({ ...cfg, maxBuyIn: num(e.target.value) })} /></div>
-          <div className="field"><label>Seconds to act</label>
-            <input type="number" value={cfg.actionTimeSec} onChange={(e) => setCfg({ ...cfg, actionTimeSec: Math.max(5, num(e.target.value)) })} /></div>
+        <div className="mode-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "local"}
+            className={`mode-tab${tab === "local" ? " active" : ""}`}
+            onClick={() => setTab("local")}>
+            Local hot-seat
+          </button>
+          <button role="tab" aria-selected={tab === "online"}
+            className={`mode-tab${tab === "online" ? " active" : ""}`}
+            onClick={() => setTab("online")}>
+            Online room
+          </button>
         </div>
 
-        <h2>Players ({players.length}/8)</h2>
-        {players.map((p, i) => (
-          <div className="player-row" key={p.id}>
-            <input type="text" placeholder={`Player ${i + 1}`} value={p.name}
-              onChange={(e) => setPlayers(players.map((x) => x.id === p.id ? { ...x, name: e.target.value } : x))} />
-            <input className="buyin" type="number" value={p.buyIn} title="Buy-in"
-              onChange={(e) => setPlayers(players.map((x) => x.id === p.id ? { ...x, buyIn: num(e.target.value) } : x))} />
-            {players.length > 2 && (
-              <button className="icon-btn" aria-label={`Remove ${p.name}`}
-                onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}>✕</button>
-            )}
-          </div>
-        ))}
-        {players.length < 8 && (
-          <button className="ghost-btn"
-            onClick={() => setPlayers([...players, { id: `p${Date.now()}`, name: "", buyIn: cfg.defaultBuyIn }])}>
-            + Add player
-          </button>
+        {tab === "local" ? (
+          <GameSetupForm submitLabel="Deal the first hand" idMode="auto"
+            onSubmit={onStartLocal} />
+        ) : (
+          <>
+            <h2>Join a room</h2>
+            <div className="field-row">
+              <div className="field"><label>Room name</label>
+                <input type="text" placeholder="friday-night" value={room}
+                  onChange={(e) => setRoom(e.target.value)} /></div>
+              <div className="field"><label>Your name</label>
+                <input type="text" placeholder="kabir" value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && joinValid) join(); }} /></div>
+            </div>
+            <p className="form-hint">
+              Everyone types the same room name. The host starts the game once
+              everyone&apos;s in. (Name-based login is temporary — keywords come in Step 5.)
+            </p>
+            <button className="primary-btn" disabled={!joinValid} onClick={join}>
+              Join room
+            </button>
+          </>
         )}
-
-        <button className="primary-btn" disabled={!valid} onClick={() => onStart(cfg, players)}>
-          Deal the first hand
-        </button>
 
         {Object.keys(overall).length > 0 && (
           <div className="overall-ledger">
             <h2>Overall ledger (all sessions)</h2>
-            {Object.entries(overall).sort((a, b) => b[1] - a[1]).map(([name, net]) => (
-              <div className="row" key={name}>
-                <span>{name}</span>
+            {Object.entries(overall).sort((a, b) => b[1] - a[1]).map(([n, net]) => (
+              <div className="row" key={n}>
+                <span>{n}</span>
                 <span className={`mono ${net > 0 ? "pos" : net < 0 ? "neg" : ""}`}>
                   {net > 0 ? "+" : ""}{fmt(net)}
                 </span>

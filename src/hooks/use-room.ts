@@ -1,0 +1,135 @@
+"use client";
+// ============================================================
+// useRoom — the client's single connection to the game server.
+//
+// Wraps PartySocket (auto-reconnecting websocket) and turns the
+// server's messages into React state. This hook is the ONLY place
+// the client touches the wire; components stay dumb renderers.
+//
+// Connection status is tracked explicitly because a frozen table
+// and a disconnected one look identical otherwise:
+//   connecting   → first connect still in flight
+//   connected    → live
+//   reconnecting → dropped, PartySocket is retrying
+//   disconnected → down for 15s+ (still retrying underneath)
+// ============================================================
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PartySocket } from "partysocket";
+import type { GameState, LedgerRow, PlayerAction, SessionSummary } from "@/engine/types";
+import type {
+  ChatEntry, ClientMessage, HostCommand, PresenceMember, ServerMessage,
+} from "@shared/protocol";
+
+export type ConnectionStatus =
+  | "connecting" | "connected" | "reconnecting" | "disconnected";
+
+// After this long without a socket, "reconnecting" becomes the harder
+// "disconnected" (retries continue — this is about honest display).
+const DISCONNECTED_AFTER_MS = 15_000;
+
+// The party name is the kebab-cased Durable Object binding (TableServer).
+const PARTY_NAME = "table-server";
+const DEFAULT_HOST = "127.0.0.1:8787"; // `npm run party:dev`
+
+export interface RoomHandle {
+  status: ConnectionStatus;
+  members: PresenceMember[];   // who's in the room right now
+  state: GameState | null;     // latest filtered snapshot (null pre-start)
+  ledger: LedgerRow[];         // session ledger, server-computed
+  chat: ChatEntry[];
+  summary: SessionSummary | null; // set when the host ends the session
+  lastError: string | null;    // most recent server rejection, if any
+  mySeat: number | null;
+  send: {
+    act: (action: PlayerAction, amount?: number) => void;
+    show: () => void;
+    chat: (text: string) => void;
+    host: (cmd: HostCommand) => void;
+  };
+}
+
+export function useRoom(room: string, myId: string): RoomHandle {
+  const socketRef = useRef<PartySocket | null>(null);
+  const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [members, setMembers] = useState<PresenceMember[]>([]);
+  const [state, setState] = useState<GameState | null>(null);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const socket = new PartySocket({
+      host: process.env.NEXT_PUBLIC_PARTY_HOST ?? DEFAULT_HOST,
+      party: PARTY_NAME,
+      room,
+    });
+    socketRef.current = socket;
+    let downTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const onOpen = () => {
+      if (downTimer) { clearTimeout(downTimer); downTimer = null; }
+      setStatus("connected");
+      // (Re)announce identity on every connect — a reconnect is a new
+      // socket, and the server maps identity per connection.
+      socket.send(JSON.stringify({ type: "join", playerId: myId } satisfies ClientMessage));
+    };
+
+    const onClose = () => {
+      setStatus((prev) => (prev === "disconnected" ? prev : "reconnecting"));
+      if (!downTimer) {
+        downTimer = setTimeout(() => setStatus("disconnected"), DISCONNECTED_AFTER_MS);
+      }
+    };
+
+    const onMessage = (e: MessageEvent) => {
+      let msg: ServerMessage;
+      try { msg = JSON.parse(String(e.data)); } catch { return; }
+      switch (msg.type) {
+        case "state":       setState(msg.state); break;
+        case "noGame":      setState(null); setSummary(null); break;
+        case "ledger":      setLedger(msg.rows); break;
+        case "presence":    setMembers(msg.members); break;
+        case "chat":        setChat((c) => [...c.slice(-49), msg.entry]); break;
+        case "chatHistory": setChat(msg.entries); break;
+        case "ended":       setSummary(msg.summary); break;
+        case "error":       setLastError(msg.msg); break;
+        case "you":         break; // seat is derived from state below
+      }
+    };
+
+    socket.addEventListener("open", onOpen);
+    socket.addEventListener("close", onClose);
+    socket.addEventListener("message", onMessage);
+    return () => {
+      if (downTimer) clearTimeout(downTimer);
+      socket.removeEventListener("open", onOpen);
+      socket.removeEventListener("close", onClose);
+      socket.removeEventListener("message", onMessage);
+      socket.close();
+      socketRef.current = null;
+    };
+  }, [room, myId]);
+
+  // auto-dismiss server rejections after a few seconds
+  useEffect(() => {
+    if (!lastError) return;
+    const t = setTimeout(() => setLastError(null), 4000);
+    return () => clearTimeout(t);
+  }, [lastError]);
+
+  const mySeat = state?.seats.find((s) => s.id === myId)?.seat ?? null;
+
+  const send = useMemo(() => {
+    const post = (msg: ClientMessage) => socketRef.current?.send(JSON.stringify(msg));
+    return {
+      act: (action: PlayerAction, amount?: number) => post({ type: "act", action, amount }),
+      show: () => post({ type: "show" }),
+      chat: (text: string) => post({ type: "chat", text }),
+      host: (cmd: HostCommand) => post({ type: "host", cmd }),
+    };
+  }, []);
+
+  return { status, members, state, ledger, chat, summary, lastError, mySeat, send };
+}

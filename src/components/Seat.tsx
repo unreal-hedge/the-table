@@ -9,11 +9,12 @@ interface Props {
   betX: number; betY: number;    // % position of their bet chips
   timerPct: number | null;       // 0..1 remaining, only for the actor
   peeking: boolean;
+  peekable?: boolean;            // hot-seat only; online has no peek flow
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, onPeek, winBadge }: Props) {
+export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, onPeek, winBadge }: Props) {
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
@@ -24,8 +25,11 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, onPeek, win
         style={{ left: `${x}%`, top: `${y}%` }}
       >
         <div className="seat-cards">
-          {v.inHand && v.holeCards &&
-            v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} small />)}
+          {/* online: server strips opponents' holeCards to null — still
+              show backs, an in-hand player must LOOK in the hand */}
+          {v.inHand && (v.holeCards
+            ? v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} small />)
+            : [0, 1].map((i) => <CardFace key={i} card={null} small />))}
         </div>
         <div className="plate">
           {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
@@ -40,7 +44,7 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, onPeek, win
             </div>
           )}
         </div>
-        {v.isTurn && v.inHand && !v.revealed && (
+        {peekable && v.isTurn && v.inHand && !v.revealed && (
           <button className="peek-btn" onClick={onPeek}>
             {peeking ? "hide cards" : "peek at cards"}
           </button>

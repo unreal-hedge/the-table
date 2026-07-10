@@ -1,0 +1,134 @@
+"use client";
+// ============================================================
+// OnlineGame — multiplayer mode. Everything on screen is driven
+// by server-pushed state via useRoom; this component sends small
+// intent messages and renders what comes back.
+//
+// Explicit connection UX (Kabir's requirements):
+//  - status pill (connected / reconnecting / disconnected) always visible
+//  - "in room: [names]" presence line for two-device debugging
+//  - a dropped connection shows a full veil — never a silent freeze
+// ============================================================
+
+import { useState } from "react";
+import { useRoom, ConnectionStatus } from "@/hooks/use-room";
+import { PROVISIONAL_HOST_IDS } from "@shared/protocol";
+import { GameSetupForm } from "./GameSetupForm";
+import { TableView } from "./TableView";
+import { EndScreen } from "./EndScreen";
+
+interface Props {
+  room: string;
+  myId: string;
+  onExit: () => void;
+}
+
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  connecting: "connecting…",
+  connected: "connected",
+  reconnecting: "reconnecting…",
+  disconnected: "disconnected",
+};
+const STATUS_CLASS: Record<ConnectionStatus, string> = {
+  connecting: "warn", connected: "ok", reconnecting: "warn", disconnected: "bad",
+};
+
+function ConnPill({ status }: { status: ConnectionStatus }) {
+  return (
+    <span className={`conn-pill ${STATUS_CLASS[status]}`}>
+      <span className="dot" />{STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+export function OnlineGame({ room, myId, onExit }: Props) {
+  const r = useRoom(room, myId);
+  const [summaryDismissed, setSummaryDismissed] = useState(false);
+  const isHost = PROVISIONAL_HOST_IDS.includes(myId);
+  const memberNames = r.members.map((m) => m.name).join(", ") || "just you";
+
+  // ----- session over -----
+  if (r.summary && !summaryDismissed) {
+    return (
+      <EndScreen summary={r.summary} backLabel="Back to room"
+        onBack={() => setSummaryDismissed(true)} />
+    );
+  }
+
+  // ----- waiting room (no game yet, or last one ended) -----
+  const gameRunning = r.state != null && r.state.phase !== "ended";
+  if (!gameRunning) {
+    return (
+      <div className="lobby">
+        <div className="lobby-card">
+          <h1>The Table <span className="suit">♠</span></h1>
+          <p className="sub">
+            room <span className="mono">{room}</span> · you are <span className="mono">{myId}</span>
+          </p>
+          <div className="net-row">
+            <ConnPill status={r.status} />
+            <span className="room-line">in room: {memberNames}</span>
+          </div>
+
+          {isHost ? (
+            <GameSetupForm submitLabel="Start the game" idMode="name"
+              onSubmit={(config, players) => {
+                setSummaryDismissed(false);
+                r.send.host({ kind: "start", config, players });
+              }} />
+          ) : (
+            <p className="waiting-note">Waiting for the host to start the game…</p>
+          )}
+
+          {r.lastError && <p className="form-hint error">{r.lastError}</p>}
+          <button className="ghost-btn" style={{ marginTop: 18 }} onClick={onExit}>
+            Leave room
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ----- live table -----
+  const offline = r.status !== "connected";
+  return (
+    <TableView
+      state={r.state!}
+      mode="online"
+      mySeat={r.mySeat}
+      isHost={isHost}
+      ledgerRows={r.ledger}
+      corner={
+        <div className="net-corner">
+          <ConnPill status={r.status} />
+          <span className="room-line">in room: {memberNames}</span>
+        </div>
+      }
+      overlay={
+        <>
+          {r.lastError && <div className="err-toast">{r.lastError}</div>}
+          {offline && (
+            <div className="veil">
+              <div>
+                <div className="msg">
+                  {r.status === "disconnected" ? "Disconnected" : "Reconnecting…"}
+                </div>
+                <div className="hint">
+                  {r.status === "disconnected"
+                    ? "Check your internet. We'll keep retrying — your seat is safe."
+                    : "Connection dropped — trying to get you back to the table."}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      }
+      onAct={(a, amt) => r.send.act(a, amt)}
+      onShow={() => r.send.show()}
+      onPause={isHost ? () => r.send.host({ kind: "pause" }) : undefined}
+      onEnd={isHost ? () => r.send.host({ kind: "end" }) : undefined}
+      onAddChips={isHost ? (id, amt) => r.send.host({ kind: "addChips", playerId: id, amount: amt }) : undefined}
+      onSitToggle={isHost ? (id, out) => r.send.host({ kind: "sitOut", playerId: id, out }) : undefined}
+    />
+  );
+}
