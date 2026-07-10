@@ -15,7 +15,7 @@ Goal: friends join from their own phones/laptops via one shared link. Server is 
 
 - [x] **PartyKit status check** — DONE. PartyKit is alive & Cloudflare-owned (releases as of June 2026, no deprecation), backed by Durable Objects. Decision: build on **PartyServer** (the actively-developed library) running on our own **Cloudflare account**, deployed with `wrangler` — same room-based programming model as classic PartyKit, more future-proof. Classic `partykit` CLI was the simpler-but-less-maintained alternative; not chosen.
 - [x] **Repo layout (engine move)** — DONE. `src/engine/` → `shared/engine/` (content unchanged). `@/engine/*` alias repointed in tsconfig so client imports are untouched; root scripts updated. Test + build green.
-- [ ] **Repo layout (server folder)** — add `party/` (PartyServer) folder. *(Step 2)*
+- [x] **Repo layout (server folder)** — DONE. `party/` with `server.ts` (TableServer skeleton), `wrangler.jsonc` (DO binding + SQLite migration + nodejs_compat), own `tsconfig.json`. Root tsconfig excludes `party/`. Scripts: `party:dev`, `party:deploy`, `party:check`. Verified: worker typechecks, `wrangler --dry-run` bundles + binding resolves, engine test + Next build still green.
 - [ ] **Protocol** — client sends small messages (`{type:"act"}`, `{type:"chat"}`, host controls); server broadcasts per-player `GameState` with everyone else's `holeCards` stripped until showdown.
   - [ ] Acceptance: devtools/network on one client never reveals another player's cards.
 - [ ] **Login** — one shared room link + per-person keyword. Host (Kabir/Parth keywords) configures players + keywords in the lobby.

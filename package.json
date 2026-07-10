@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "party:dev": "wrangler dev -c party/wrangler.jsonc",
+    "party:deploy": "wrangler deploy -c party/wrangler.jsonc",
+    "party:check": "tsc --noEmit -p party/tsconfig.json",
     "postinstall": "patch-package"
   },
   "dependencies": {
@@ -14,18 +17,22 @@
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "next": "14.2.35",
+    "partyserver": "^0.5.8",
+    "partysocket": "^1.3.0",
     "poker-ts": "^1.5.0",
     "pokersolver": "^2.1.4",
     "react": "^18",
     "react-dom": "^18"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260710.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "patch-package": "^8.0.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.110.0"
   }
 }

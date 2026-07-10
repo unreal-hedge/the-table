@@ -1,0 +1,19 @@
+{
+  // The Table — Cloudflare Worker + Durable Object config for the game server.
+  // `main` and paths here are resolved relative to THIS file (the party/ folder).
+  "name": "the-table",
+  "main": "server.ts",
+  "compatibility_date": "2026-07-01",
+  // poker-ts (wired in Step 3) may touch Node built-ins; enable the shim now.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // One Durable Object class == one poker room. Binding name must match
+  // the `Env.TableServer` property in server.ts.
+  "durable_objects": {
+    "bindings": [{ "name": "TableServer", "class_name": "TableServer" }]
+  },
+  // SQLite-backed Durable Objects (required for PartyServer hibernation).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TableServer"] }],
+
+  "observability": { "enabled": true }
+}

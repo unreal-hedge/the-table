@@ -1,0 +1,20 @@
+{
+  // Separate TS config for the worker: it runs on Cloudflare's runtime
+  // (workers-types), NOT the browser DOM. Kept apart from the root
+  // tsconfig so Next's build never type-checks worker globals and vice versa.
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2022"],
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  // The worker code plus the shared engine it will import in Step 3.
+  "include": ["**/*.ts", "../shared/engine/**/*.ts"]
+}
