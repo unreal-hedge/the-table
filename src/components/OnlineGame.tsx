@@ -118,6 +118,7 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
       mySeat={r.mySeat}
       isHost={isHost}
       ledgerRows={r.ledger}
+      clockOffsetMs={r.clockSkewMs}
       corner={
         <div className="net-corner">
           <ConnPill status={r.status} />
@@ -144,6 +145,7 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
         </>
       }
       onAct={(a, amt) => r.send.act(a, amt)}
+      onTimeBank={() => r.send.timeBank()} // server-verified; button live again (Step 6)
       onShow={() => r.send.show()}
       onPause={isHost ? () => r.send.host({ kind: "pause" }) : undefined}
       onEnd={isHost ? () => r.send.host({ kind: "end" }) : undefined}

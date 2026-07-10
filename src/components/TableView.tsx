@@ -31,6 +31,7 @@ interface Props {
   mySeat?: number | null;        // online: which seat is me
   isHost: boolean;               // pause/end controls + ledger editing
   ledgerRows: LedgerRow[];
+  clockOffsetMs?: number;        // serverNow - clientNow (display-only skew fix)
   corner?: ReactNode;            // online: connection pill + room line
   overlay?: ReactNode;           // online: disconnect veil / error toast
   onAct: (a: PlayerAction, amount?: number) => void;
@@ -43,7 +44,8 @@ interface Props {
 }
 
 export function TableView({
-  state: s, mode, mySeat = null, isHost, ledgerRows, corner, overlay,
+  state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
+  corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onAddChips, onSitToggle,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
@@ -58,8 +60,10 @@ export function TableView({
   }, []);
 
   const n = s.seats.length;
+  // deadlines are SERVER epoch ms — offset our clock so the bar reads true
+  const displayNow = Date.now() + clockOffsetMs;
   const timerPct = s.turnDeadlineAt && s.turnStartedAt
-    ? Math.max(0, (s.turnDeadlineAt - Date.now()) / (s.turnDeadlineAt - s.turnStartedAt))
+    ? Math.max(0, (s.turnDeadlineAt - displayNow) / (s.turnDeadlineAt - s.turnStartedAt))
     : null;
   const winBySeat = new Map(
     (s.phase === "handEnded" ? s.lastHandResult ?? [] : []).map((r) => [

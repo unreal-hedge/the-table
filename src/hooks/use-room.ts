@@ -43,9 +43,11 @@ export interface RoomHandle {
   mySeat: number | null;
   isHost: boolean;             // server-confirmed (roster), not client-guessed
   kicked: boolean;             // seat taken over from another device (8.2)
+  clockSkewMs: number;         // serverNow - clientNow; countdowns add this
   rejoin: () => void;          // deliberate re-login (kicks the other device back)
   send: {
     act: (action: PlayerAction, amount?: number) => void;
+    timeBank: () => void;
     show: () => void;
     chat: (text: string) => void;
     host: (cmd: HostCommand) => void;
@@ -63,6 +65,7 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
   const [lastError, setLastError] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
   const [kicked, setKicked] = useState(false);
+  const [clockSkewMs, setClockSkewMs] = useState(0);
   // bumping this remounts the socket — used by rejoin() after a kick
   const [attempt, setAttempt] = useState(0);
 
@@ -98,7 +101,12 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
       let msg: ServerMessage;
       try { msg = JSON.parse(String(e.data)); } catch { return; }
       switch (msg.type) {
-        case "state":       setState(msg.state); break;
+        case "state":
+          setState(msg.state);
+          // display-only skew estimate; network transit inflates it by a few
+          // ms, irrelevant next to the multi-second phone-clock drift it fixes
+          setClockSkewMs(msg.at - Date.now());
+          break;
         case "noGame":      setState(null); setSummary(null); break;
         case "ledger":      setLedger(msg.rows); break;
         case "presence":    setMembers(msg.members); break;
@@ -149,6 +157,7 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
     const post = (msg: ClientMessage) => socketRef.current?.send(JSON.stringify(msg));
     return {
       act: (action: PlayerAction, amount?: number) => post({ type: "act", action, amount }),
+      timeBank: () => post({ type: "timeBank" }),
       show: () => post({ type: "show" }),
       chat: (text: string) => post({ type: "chat", text }),
       host: (cmd: HostCommand) => post({ type: "host", cmd }),
@@ -157,6 +166,6 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
 
   return {
     status, members, state, ledger, chat, summary, lastError, mySeat,
-    isHost, kicked, rejoin, send,
+    isHost, kicked, clockSkewMs, rejoin, send,
   };
 }

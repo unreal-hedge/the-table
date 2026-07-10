@@ -38,6 +38,10 @@ export interface Env {
 
 // Matches the hot-seat UI's pause between hands (page.tsx uses 4200ms).
 const HAND_END_PAUSE_MS = 4200;
+// Server-side slack past the action deadline before forcing the auto
+// check/fold — covers network latency so a buzzer-beater call isn't
+// unfairly beaten by the server's own clock (Step 6, spec 5.3).
+const CLOCK_GRACE_MS = 750;
 
 export class TableServer extends Server<Env> {
   // NOT hibernatable: the GameManager (deck, hidden cards, clocks)
@@ -57,6 +61,9 @@ export class TableServer extends Server<Env> {
   private creatorId: string | null = null;
   private chat: ChatEntry[] = [];
   private dealTimer: ReturnType<typeof setTimeout> | null = null;
+  /** THE action clock (Step 6): the server owns timeouts now; client
+   *  countdowns are display only. Re-armed after every mutation. */
+  private clockTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ---------- connection lifecycle ----------
 
@@ -92,11 +99,12 @@ export class TableServer extends Server<Env> {
     if (!playerId) return this.error(conn, "Join first");
 
     switch (msg.type) {
-      case "act":  return this.handleAct(conn, playerId, msg.action, msg.amount);
-      case "show": return this.handleShow(conn, playerId);
-      case "chat": return this.handleChat(conn, playerId, msg.text);
-      case "host": return this.handleHost(conn, playerId, msg.cmd);
-      default:     return this.error(conn, "Unknown message type");
+      case "act":      return this.handleAct(conn, playerId, msg.action, msg.amount);
+      case "timeBank": return this.handleTimeBank(conn, playerId);
+      case "show":     return this.handleShow(conn, playerId);
+      case "chat":     return this.handleChat(conn, playerId, msg.text);
+      case "host":     return this.handleHost(conn, playerId, msg.cmd);
+      default:         return this.error(conn, "Unknown message type");
     }
   }
 
@@ -141,6 +149,7 @@ export class TableServer extends Server<Env> {
       this.send(conn, {
         type: "state",
         state: filterStateFor(this.gm.state(), this.seatOf(id)),
+        at: Date.now(),
       });
       this.send(conn, { type: "ledger", rows: this.gm.ledger() });
     } else {
@@ -182,6 +191,17 @@ export class TableServer extends Server<Env> {
       return this.error(conn, "Action rejected by engine");
     }
     this.afterMutation();
+  }
+
+  private handleTimeBank(conn: Connection, playerId: string) {
+    if (!this.gm) return this.error(conn, "No game running");
+    const seat = this.seatOf(playerId);
+    // same rule as act: only the player on the clock can extend it
+    if (seat == null || this.gm.state().playerToAct !== seat) {
+      return this.error(conn, "Not your turn");
+    }
+    if (!this.gm.useTimeBank()) return this.error(conn, "No time bank left");
+    this.afterMutation(); // broadcasts the new deadline + re-arms the clock
   }
 
   private handleShow(conn: Connection, playerId: string) {
@@ -286,7 +306,8 @@ export class TableServer extends Server<Env> {
   // ---------- broadcast & timers ----------
 
   /** Call after every engine mutation: pushes fresh filtered state to
-   *  everyone and schedules the between-hands auto-deal. */
+   *  everyone, schedules the between-hands auto-deal, and re-arms the
+   *  server-owned action clock. */
   private afterMutation() {
     if (!this.gm) return;
     const base = this.gm.state();
@@ -299,19 +320,44 @@ export class TableServer extends Server<Env> {
         this.dealTimer = null;
         if (!this.gm || this.gm.state().phase !== "handEnded") return;
         this.gm.dealNextHand();
-        // If still handEnded (fewer than 2 eligible players), don't loop —
-        // the host deals manually via "dealNext" once rebuys/sit-ins land.
-        this.broadcastState(this.gm.state());
+        if (this.gm.state().phase === "handEnded") {
+          // Still handEnded = fewer than 2 eligible players. Don't loop —
+          // the host deals manually via "dealNext" once rebuys/sit-ins land.
+          this.broadcastState(this.gm.state());
+        } else {
+          // through afterMutation so the NEW hand's action clock is armed
+          this.afterMutation();
+        }
       }, HAND_END_PAUSE_MS);
+    }
+
+    // Server-owned action clock (Step 6). One timer for the one player on
+    // the clock; pause/resume and hand changes all pass through here, so
+    // clearing + re-arming per mutation is always correct.
+    if (this.clockTimer) { clearTimeout(this.clockTimer); this.clockTimer = null; }
+    if (base.phase === "inHand" && base.turnDeadlineAt != null) {
+      const wait = Math.max(0, base.turnDeadlineAt - Date.now()) + CLOCK_GRACE_MS;
+      this.clockTimer = setTimeout(() => {
+        this.clockTimer = null;
+        if (!this.gm) return;
+        const s = this.gm.state();
+        if (s.phase !== "inHand" || s.turnDeadlineAt == null) return;
+        // deadline moved (time bank landed as we fired)? the mutation that
+        // moved it already re-armed a fresh timer — stand down
+        if (Date.now() < s.turnDeadlineAt) return;
+        this.gm.timeout(); // engine applies auto check/fold + sit-out rules
+        this.afterMutation();
+      }, wait);
     }
   }
 
   /** One engine snapshot, filtered per receiving connection. */
   private broadcastState(base: GameState) {
+    const at = Date.now();
     for (const conn of this.getConnections()) {
       const pid = this.joined.get(conn.id);
       if (pid === undefined) continue; // not joined: receives nothing
-      this.send(conn, { type: "state", state: filterStateFor(base, this.seatOf(pid)) });
+      this.send(conn, { type: "state", state: filterStateFor(base, this.seatOf(pid)), at });
     }
   }
 

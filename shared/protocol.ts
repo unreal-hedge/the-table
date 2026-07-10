@@ -19,6 +19,7 @@ export type ClientMessage =
   // becomes host and their keyword is registered as typed.
   | { type: "join"; playerId: string; keyword: string }
   | { type: "act"; action: PlayerAction; amount?: number }
+  | { type: "timeBank" }               // +30s, actor only — server-verified (spec 5.2)
   | { type: "show" }                   // voluntary show after a fold-win (spec 9.1)
   | { type: "chat"; text: string }
   | { type: "host"; cmd: HostCommand };
@@ -45,7 +46,9 @@ export interface ChatEntry { from: string; text: string; at: number }
 
 export type ServerMessage =
   | { type: "you"; playerId: string; seat: number | null; host: boolean }
-  | { type: "state"; state: GameState } // YOUR cards only; others stripped until revealed
+  // `at` = server clock when sent: clients offset their countdown display
+  // by (at - Date.now()) so phone clock skew doesn't lie about the timer.
+  | { type: "state"; state: GameState; at: number } // YOUR cards only; others stripped until revealed
   | { type: "noGame" } // join response when no game is running — clears any stale client state
   | { type: "kicked" } // this connection lost its seat to a login from another device (8.2)
   | { type: "presence"; members: PresenceMember[] } // who's connected right now

@@ -12,6 +12,10 @@
 //   6. correct keyword from a NEW device takes the seat over
 //      mid-hand; the old connection is kicked and goes silent
 //   7. the final ledger arrives and nets to zero
+//   8. the SERVER owns the clock: a bot that goes silent on its turn
+//      is auto-acted within actionTimeSec + grace (Step 6)
+//   9. timeBank: the actor can extend their deadline; anyone else
+//      gets "Not your turn"
 //
 // Usage:  npm run party:dev   (in another terminal)
 //         npx tsx test-online.ts
@@ -25,7 +29,12 @@ const HOST = process.env.PARTY_HOST ?? "127.0.0.1:8787";
 const ROOM = `e2e-${Date.now()}`; // fresh room per run — no stale state
 const HANDS_TO_PLAY = 10;
 const TAKEOVER_AT_HAND = 3;
+const TIMEBANK_AT_HAND = 4;   // arjun extends his clock once
+const GO_SILENT_AT_HAND = 5;  // dev2 skips a turn — server must time him out
+const ACTION_TIME_SEC = 5;    // short clock so the timeout test stays fast
 const WATCHDOG_MS = 180_000;
+
+let timeoutObserved = false;  // any state's log shows a server-forced action
 
 const KEYWORDS: Record<string, string> = {
   kabir: "masala", arjun: "idli", dev: "dosa",
@@ -52,10 +61,20 @@ class Bot {
   private misbehaved = false;
   private lastRebuyHand = 0;
 
+  private usedTimeBank = false;
+  private tbDeadlineBefore: number | null = null;
+  timeBankExtended = false;
+  private wentSilent = false;
+
   constructor(
     public id: string,
     public label: string, // "dev1"/"dev2" — two bots may share an id
-    private opts: { isHost?: boolean; misbehave?: "act" | "host" | null }
+    private opts: {
+      isHost?: boolean;
+      misbehave?: "act" | "host" | "timebank" | null;
+      useTimeBank?: boolean;  // legit +30s on own turn at TIMEBANK_AT_HAND
+      goSilent?: boolean;     // skip one turn at GO_SILENT_AT_HAND — server must act
+    }
   ) {
     this.ws = new WebSocket(wsUrl());
     this.ws.addEventListener("open", () =>
@@ -93,6 +112,7 @@ class Bot {
   private onState(s: GameState) {
     this.seat = s.seats.find((x) => x.id === this.id)?.seat ?? null;
     this.latestHand = s.handNumber;
+    if (s.log.some((l) => l.includes("timed out — auto"))) timeoutObserved = true;
 
     // host tops up busted players between hands (once per hand end) —
     // without this, two bust-outs leave <2 eligible and the game
@@ -129,6 +149,9 @@ class Bot {
       } else if (this.opts.misbehave === "host") {
         this.misbehaved = true;
         this.send({ type: "host", cmd: { kind: "pause" } }); // not a host — must bounce
+      } else if (this.opts.misbehave === "timebank" && s.playerToAct !== this.seat) {
+        this.misbehaved = true;
+        this.send({ type: "timeBank" }); // not our clock — must bounce
       }
     }
 
@@ -136,6 +159,24 @@ class Bot {
     // (the server pushes exactly one state per mutation, so "act once
     // per received state" cannot double-fire — no dedupe needed)
     if (s.phase !== "inHand" || s.playerToAct !== this.seat || !s.legalActions) return;
+
+    // timeBank verification: the post-timeBank state must show a later deadline
+    if (this.tbDeadlineBefore != null && s.turnDeadlineAt != null) {
+      if (s.turnDeadlineAt > this.tbDeadlineBefore) this.timeBankExtended = true;
+      this.tbDeadlineBefore = null;
+      // fall through and act on the extended clock
+    } else if (this.opts.useTimeBank && !this.usedTimeBank && s.handNumber >= TIMEBANK_AT_HAND) {
+      this.usedTimeBank = true;
+      this.tbDeadlineBefore = s.turnDeadlineAt;
+      this.send({ type: "timeBank" }); // legit: it IS our turn
+      return; // act on the next state, which must carry the extended deadline
+    }
+
+    // go silent once: say nothing and let the SERVER's clock act for us
+    if (this.opts.goSilent && !this.wentSilent && s.handNumber >= GO_SILENT_AT_HAND) {
+      this.wentSilent = true;
+      return;
+    }
 
     const la = s.legalActions;
     const r = Math.random();
@@ -178,7 +219,7 @@ function runMallory() {
 }
 
 // ---- run ----
-const kabir = new Bot("kabir", "kabir", { isHost: true, misbehave: null });
+const kabir = new Bot("kabir", "kabir", { isHost: true, misbehave: "timebank" });
 const bots: Bot[] = [kabir];
 let arjun: Bot, dev1: Bot, dev2: Bot | null = null;
 
@@ -190,7 +231,8 @@ setTimeout(() => {
       kind: "start",
       config: {
         smallBlind: 100, bigBlind: 200, defaultBuyIn: 2000,
-        minBuyIn: 500, maxBuyIn: 50000, actionTimeSec: 30, timeBankSec: 30,
+        minBuyIn: 500, maxBuyIn: 50000,
+        actionTimeSec: ACTION_TIME_SEC, timeBankSec: 30,
       },
       players: [
         { id: "kabir", name: "Kabir", buyIn: 2000, keyword: KEYWORDS.kabir },
@@ -202,8 +244,9 @@ setTimeout(() => {
 }, 1000);
 
 setTimeout(() => {
-  arjun = new Bot("arjun", "arjun", { misbehave: "host" }); // tries a host command
-  dev1 = new Bot("dev", "dev1", { misbehave: "act" });      // acts out of turn
+  // arjun: tries a host command (bounce) + later a LEGIT time bank (extend)
+  arjun = new Bot("arjun", "arjun", { misbehave: "host", useTimeBank: true });
+  dev1 = new Bot("dev", "dev1", { misbehave: "act" }); // acts out of turn
   bots.push(arjun, dev1);
 }, 2000);
 
@@ -216,7 +259,8 @@ const takeoverTrigger = setInterval(() => {
   if (dev2 || !dev1) return;
   if (dev1.latestHand >= TAKEOVER_AT_HAND) {
     clearInterval(takeoverTrigger);
-    dev2 = new Bot("dev", "dev2", { misbehave: null });
+    // dev2 also runs the server-clock test: goes silent on one turn later
+    dev2 = new Bot("dev", "dev2", { misbehave: null, goSilent: true });
     bots.push(dev2);
   }
 }, 300);
@@ -247,6 +291,11 @@ const poll = setInterval(() => {
   if (!dev1.rejectionSeen) fail("dev1's out-of-turn act was NOT rejected");
   if (!arjun.rejectionSeen) fail("arjun's host command was NOT rejected");
 
+  // Step 6: server-owned clock + time bank
+  if (!timeoutObserved) fail("dev2 went silent but the server never timed him out");
+  if (!arjun.timeBankExtended) fail("arjun's time bank did not extend his deadline");
+  if (!kabir.rejectionSeen) fail("kabir's out-of-turn timeBank was NOT rejected");
+
   // condition 6: takeover — old connection silent after kick
   if (dev1.statesAfterKick > 0) {
     fail(`dev1 received ${dev1.statesAfterKick} states AFTER being kicked — two live connections on one seat`);
@@ -265,6 +314,7 @@ const poll = setInterval(() => {
   console.log(`hands: ${sum.handsPlayed} · strips: kabir=${kabir.stripChecks} arjun=${arjun.stripChecks} dev2=${dev2!.stripChecks}`);
   console.log("out-of-turn rejected ✅ · non-host rejected ✅ · identical invalid logins ✅");
   console.log(`takeover: dev1 kicked at hand ≥${TAKEOVER_AT_HAND}, silent after (${dev1.statesAfterKick} leaks) · dev2 played on ✅`);
+  console.log("server clock timed out a silent player ✅ · time bank extended deadline ✅ · out-of-turn timeBank rejected ✅");
   console.log("ledger nets 0 ✅");
   console.log("ONLINE E2E PASS ✅");
   [...bots].forEach((b) => b.ws.close());
