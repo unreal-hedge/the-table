@@ -1,5 +1,7 @@
 # The Table — Build Roadmap
 
+> ⚠️ **Provisional join is insecure until Step 5 — do not share the room link with the group before then.** (Anyone who knows a playerId — including "kabir"/"parth", which carry host powers — can claim that identity. Keyword login in Step 5 replaces this.)
+
 The plan, phase by phase. **Every phase has a gate**: engine test passes (`npx tsx test-engine.ts`) + `npm run build` clean + Kabir playtests and says **"gate passed"** before the next phase starts. Never build two phases in one go. Checkboxes get updated as work lands.
 
 Rules that never change (from CLAUDE.md):
@@ -16,8 +18,8 @@ Goal: friends join from their own phones/laptops via one shared link. Server is 
 - [x] **PartyKit status check** — DONE. PartyKit is alive & Cloudflare-owned (releases as of June 2026, no deprecation), backed by Durable Objects. Decision: build on **PartyServer** (the actively-developed library) running on our own **Cloudflare account**, deployed with `wrangler` — same room-based programming model as classic PartyKit, more future-proof. Classic `partykit` CLI was the simpler-but-less-maintained alternative; not chosen.
 - [x] **Repo layout (engine move)** — DONE. `src/engine/` → `shared/engine/` (content unchanged). `@/engine/*` alias repointed in tsconfig so client imports are untouched; root scripts updated. Test + build green.
 - [x] **Repo layout (server folder)** — DONE. `party/` with `server.ts` (TableServer skeleton), `wrangler.jsonc` (DO binding + SQLite migration + nodejs_compat), own `tsconfig.json`. Root tsconfig excludes `party/`. Scripts: `party:dev`, `party:deploy`, `party:check`. Verified: worker typechecks, `wrangler --dry-run` bundles + binding resolves, engine test + Next build still green.
-- [ ] **Protocol** — client sends small messages (`{type:"act"}`, `{type:"chat"}`, host controls); server broadcasts per-player `GameState` with everyone else's `holeCards` stripped until showdown.
-  - [ ] Acceptance: devtools/network on one client never reveals another player's cards.
+- [x] **Protocol** — DONE. `shared/protocol.ts` (wire contract, co-owned like types.ts); `party/filter.ts` strips other players' un-revealed holeCards per viewer; `party/server.ts` is the authoritative host. Server verifies every `act` (connection → playerId → seat must equal playerToAct) and `host` command (host ids only) — the client's word is never trusted. Chat relay w/ last-50 buffer included. Patched poker-ts verified present in the worker bundle.
+  - [x] Acceptance (code level): `npx tsx test-filter.ts` — 80 hands, 20k+ strip assertions after every action, showdown reveals still visible. Live devtools check happens at the phase gate.
 - [ ] **Login** — one shared room link + per-person keyword. Host (Kabir/Parth keywords) configures players + keywords in the lobby.
   - [ ] Re-login with your keyword from another device takes over your seat mid-hand (spec 8.2).
   - [ ] 2-minute disconnect grace before a player counts as gone.

@@ -15,6 +15,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  // The worker code plus the shared engine it will import in Step 3.
-  "include": ["**/*.ts", "../shared/engine/**/*.ts"]
+  // The worker code plus everything it imports from shared/.
+  "include": ["**/*.ts", "../shared/**/*.ts"]
 }
