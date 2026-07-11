@@ -28,6 +28,7 @@ const gm = new GameManager(DEFAULT_CONFIG, [
 
 let strippedChecks = 0;  // hidden-card assertions that actually fired
 let revealChecks = 0;    // showdown-visibility assertions that fired
+let ownCardChecks = 0;   // own-cards-PRESENT assertions that fired (not just truth-equality)
 
 function fail(msg: string): never {
   console.error(`FILTER LEAK: ${msg}`);
@@ -47,6 +48,14 @@ function checkAllViews() {
         // (2) own cards must survive exactly
         if (JSON.stringify(seat.holeCards) !== JSON.stringify(real.holeCards)) {
           fail(`viewer ${viewer} lost their own cards`);
+        }
+        // (2b) and must actually BE THERE while in a hand — equality with
+        // truth is vacuous if both are null (the bug class Kabir hit)
+        if (real.inHand) {
+          if (!seat.holeCards || seat.holeCards.length !== 2) {
+            fail(`viewer ${viewer} is in hand #${truth.handNumber} but their own filtered cards are missing`);
+          }
+          ownCardChecks++;
         }
       } else if (real.revealed) {
         // (3) legitimate reveals stay visible
@@ -112,6 +121,7 @@ while (hands < 80 && safety++ < 50000) {
 if (hands < 80) fail(`only ${hands} hands played — driver stalled`);
 if (strippedChecks < 1000) fail(`too few strip checks fired (${strippedChecks})`);
 if (revealChecks < 50) fail(`too few showdown reveal checks fired (${revealChecks})`);
+if (ownCardChecks < 500) fail(`too few own-cards-present checks fired (${ownCardChecks})`);
 
-console.log(`hands: ${hands} · hidden-card strips verified: ${strippedChecks} · showdown reveals verified: ${revealChecks}`);
+console.log(`hands: ${hands} · hidden-card strips verified: ${strippedChecks} · showdown reveals verified: ${revealChecks} · own cards present: ${ownCardChecks}`);
 console.log("FILTER: NO LEAKS ✅");

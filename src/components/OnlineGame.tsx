@@ -92,6 +92,7 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
 
           {isHost ? (
             <GameSetupForm submitLabel="Start the game" idMode="name"
+              hostLogin={{ id: myId, keyword }}
               onSubmit={(config, players) => {
                 setSummaryDismissed(false);
                 r.send.host({ kind: "start", config, players });
@@ -123,6 +124,11 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
         <div className="net-corner">
           <ConnPill status={r.status} />
           <span className="room-line">in room: {memberNames}</span>
+          {r.mySeat == null && (
+            <span className="room-line spectate-note">
+              watching as {myId} — not seated in this game
+            </span>
+          )}
         </div>
       }
       overlay={

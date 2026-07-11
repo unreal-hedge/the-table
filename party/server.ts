@@ -240,6 +240,16 @@ export class TableServer extends Server<Env> {
         if (this.gm && this.gm.state().phase !== "ended") {
           return this.error(conn, "A session is already running");
         }
+        // The submitting host must be IN the game. Without this, a host
+        // whose login doesn't match any player row becomes a silent
+        // spectator of their own game — seated under a name that isn't
+        // their identity, own cards stripped like everyone else's.
+        if (!cmd.players.some((p) => p.id === playerId)) {
+          return this.error(
+            conn,
+            `You're not in the player list — your row must be named "${playerId}"`
+          );
+        }
         // Register every player's login before the game exists: upsert
         // roster entries (never delete — spectators keep their logins).
         for (const p of cmd.players) {

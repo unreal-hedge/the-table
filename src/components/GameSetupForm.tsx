@@ -20,17 +20,28 @@ interface Props {
    *  name — online friends log in by name + keyword, so the id must be
    *  guessable from the name. "name" mode also collects keywords. */
   idMode: "auto" | "name";
+  /** Online: the host's own login. Row 1 is locked to this name so the
+   *  host can't start a game that doesn't include their own identity
+   *  (which would make them a silent spectator of their own table). */
+  hostLogin?: { id: string; keyword: string };
   onSubmit: (config: GameConfig, players: SetupPlayer[]) => void;
 }
 
 const MIN_KEYWORD_LENGTH = 2;
 
-export function GameSetupForm({ submitLabel, idMode, onSubmit }: Props) {
+export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Props) {
   const [cfg, setCfg] = useState<GameConfig>(DEFAULT_CONFIG);
-  const [players, setPlayers] = useState<SetupPlayer[]>([
-    { id: "p1", name: "Kabir", buyIn: 1000, keyword: "", host: false },
-    { id: "p2", name: "Parth", buyIn: 1000, keyword: "", host: false },
-  ]);
+  const [players, setPlayers] = useState<SetupPlayer[]>(
+    hostLogin
+      ? [
+          { id: "p1", name: hostLogin.id, buyIn: 1000, keyword: hostLogin.keyword, host: false },
+          { id: "p2", name: "", buyIn: 1000, keyword: "", host: false },
+        ]
+      : [
+          { id: "p1", name: "Kabir", buyIn: 1000, keyword: "", host: false },
+          { id: "p2", name: "Parth", buyIn: 1000, keyword: "", host: false },
+        ]
+  );
 
   const num = (v: string) => Math.max(0, Number(v) || 0);
   const loginId = (name: string) => name.trim().toLowerCase();
@@ -78,30 +89,35 @@ export function GameSetupForm({ submitLabel, idMode, onSubmit }: Props) {
       </div>
 
       <h2>Players ({players.length}/8)</h2>
-      {players.map((p, i) => (
-        <div className="player-row" key={p.id}>
-          <input type="text" placeholder={`Player ${i + 1}`} value={p.name}
-            onChange={(e) => patch(p.id, { name: e.target.value })} />
-          {online && (
-            <input className="keyword" type="text" placeholder="keyword"
-              value={p.keyword ?? ""} title="This player's login word"
-              onChange={(e) => patch(p.id, { keyword: e.target.value })} />
-          )}
-          <input className="buyin" type="number" value={p.buyIn} title="Buy-in"
-            onChange={(e) => patch(p.id, { buyIn: num(e.target.value) })} />
-          {online && (
-            <label className="cohost-toggle" title="Co-host: can pause, rebuy, end">
-              <input type="checkbox" checked={!!p.host}
-                onChange={(e) => patch(p.id, { host: e.target.checked })} />
-              host
-            </label>
-          )}
-          {players.length > 2 && (
-            <button className="icon-btn" aria-label={`Remove ${p.name}`}
-              onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}>✕</button>
-          )}
-        </div>
-      ))}
+      {players.map((p, i) => {
+        const isLockedHostRow = !!hostLogin && i === 0;
+        return (
+          <div className="player-row" key={p.id}>
+            <input type="text" placeholder={`Player ${i + 1}`} value={p.name}
+              disabled={isLockedHostRow}
+              title={isLockedHostRow ? "You — locked to your login name" : undefined}
+              onChange={(e) => patch(p.id, { name: e.target.value })} />
+            {online && (
+              <input className="keyword" type="text" placeholder="keyword"
+                value={p.keyword ?? ""} title="This player's login word"
+                onChange={(e) => patch(p.id, { keyword: e.target.value })} />
+            )}
+            <input className="buyin" type="number" value={p.buyIn} title="Buy-in"
+              onChange={(e) => patch(p.id, { buyIn: num(e.target.value) })} />
+            {online && (
+              <label className="cohost-toggle" title="Co-host: can pause, rebuy, end">
+                <input type="checkbox" checked={!!p.host}
+                  onChange={(e) => patch(p.id, { host: e.target.checked })} />
+                host
+              </label>
+            )}
+            {players.length > 2 && !isLockedHostRow && (
+              <button className="icon-btn" aria-label={`Remove ${p.name}`}
+                onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}>✕</button>
+            )}
+          </div>
+        );
+      })}
       {players.length < 8 && (
         <button className="ghost-btn"
           onClick={() => setPlayers([...players, { id: `p${Date.now()}`, name: "", buyIn: cfg.defaultBuyIn, keyword: "", host: false }])}>

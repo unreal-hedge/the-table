@@ -57,7 +57,8 @@ class Bot {
   kicked = false;
   statesAfterKick = 0;
   latestHand = 0;
-  rejectionSeen = false; // the expected error for this bot's misbehavior test
+  rejectionSeen = false;         // the expected error for this bot's misbehavior test
+  errorsReceived: string[] = []; // every whitelisted rejection, verbatim
   private misbehaved = false;
   private lastRebuyHand = 0;
 
@@ -74,6 +75,7 @@ class Bot {
       misbehave?: "act" | "host" | "timebank" | null;
       useTimeBank?: boolean;  // legit +30s on own turn at TIMEBANK_AT_HAND
       goSilent?: boolean;     // skip one turn at GO_SILENT_AT_HAND — server must act
+      allowedErrors?: string[]; // extra expected rejections beyond the standard two
     }
   ) {
     this.ws = new WebSocket(wsUrl());
@@ -101,11 +103,14 @@ class Bot {
       case "ledger": this.ledgerRows = msg.rows.length; break;
       case "ended":  this.gotEnded = msg.summary; break;
       case "kicked": this.kicked = true; break;
-      case "error":
-        if (msg.msg === "Not your turn" || msg.msg === "Host only") {
+      case "error": {
+        const allowed = ["Not your turn", "Host only", ...(this.opts.allowedErrors ?? [])];
+        if (allowed.some((a) => msg.msg.includes(a))) {
           this.rejectionSeen = true;
+          this.errorsReceived.push(msg.msg);
         } else fail(`${this.label}: unexpected server error "${msg.msg}"`);
         break;
+      }
     }
   }
 
@@ -219,29 +224,40 @@ function runMallory() {
 }
 
 // ---- run ----
-const kabir = new Bot("kabir", "kabir", { isHost: true, misbehave: "timebank" });
+const kabir = new Bot("kabir", "kabir", {
+  isHost: true,
+  misbehave: "timebank",
+  allowedErrors: ["not in the player list"], // the bad-start guard test below
+});
 const bots: Bot[] = [kabir];
 let arjun: Bot, dev1: Bot, dev2: Bot | null = null;
 
-// kabir claims the fresh room first; roster exists only after his start
+const GAME_CONFIG = {
+  smallBlind: 100, bigBlind: 200, defaultBuyIn: 2000,
+  minBuyIn: 500, maxBuyIn: 50000,
+  actionTimeSec: ACTION_TIME_SEC, timeBankSec: 30,
+};
+const PLAYER_ROWS = [
+  { id: "kabir", name: "Kabir", buyIn: 2000, keyword: KEYWORDS.kabir },
+  { id: "arjun", name: "Arjun", buyIn: 2000, keyword: KEYWORDS.arjun },
+  { id: "dev", name: "Dev", buyIn: 2000, keyword: KEYWORDS.dev },
+];
+
+// kabir claims the fresh room first; roster exists only after his start.
+// FIRST a bad start omitting himself — the server must refuse it (the
+// silent-spectator-host trap), THEN the real one.
 setTimeout(() => {
   kabir.send({
     type: "host",
-    cmd: {
-      kind: "start",
-      config: {
-        smallBlind: 100, bigBlind: 200, defaultBuyIn: 2000,
-        minBuyIn: 500, maxBuyIn: 50000,
-        actionTimeSec: ACTION_TIME_SEC, timeBankSec: 30,
-      },
-      players: [
-        { id: "kabir", name: "Kabir", buyIn: 2000, keyword: KEYWORDS.kabir },
-        { id: "arjun", name: "Arjun", buyIn: 2000, keyword: KEYWORDS.arjun },
-        { id: "dev", name: "Dev", buyIn: 2000, keyword: KEYWORDS.dev },
-      ],
-    },
+    cmd: { kind: "start", config: GAME_CONFIG, players: PLAYER_ROWS.slice(1) },
   });
-}, 1000);
+}, 700);
+setTimeout(() => {
+  kabir.send({
+    type: "host",
+    cmd: { kind: "start", config: GAME_CONFIG, players: PLAYER_ROWS },
+  });
+}, 1200);
 
 setTimeout(() => {
   // arjun: tries a host command (bounce) + later a LEGIT time bank (extend)
@@ -294,7 +310,14 @@ const poll = setInterval(() => {
   // Step 6: server-owned clock + time bank
   if (!timeoutObserved) fail("dev2 went silent but the server never timed him out");
   if (!arjun.timeBankExtended) fail("arjun's time bank did not extend his deadline");
-  if (!kabir.rejectionSeen) fail("kabir's out-of-turn timeBank was NOT rejected");
+  if (!kabir.errorsReceived.some((e) => e === "Not your turn")) {
+    fail("kabir's out-of-turn timeBank was NOT rejected");
+  }
+
+  // host-must-be-listed guard (the silent-spectator-host trap)
+  if (!kabir.errorsReceived.some((e) => e.includes("not in the player list"))) {
+    fail("host start WITHOUT the host in the player list was NOT rejected");
+  }
 
   // condition 6: takeover — old connection silent after kick
   if (dev1.statesAfterKick > 0) {
