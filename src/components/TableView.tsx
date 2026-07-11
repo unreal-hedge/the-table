@@ -157,7 +157,14 @@ export function TableView({
         <div className="veil">
           <div>
             <div className="msg">Paused</div>
-            <div className="hint">Clock is frozen. Host resumes from the top-right.</div>
+            <div className="hint">
+              {isHost && onPause
+                ? "Clock is frozen. Take your time."
+                : "Clock is frozen. Waiting for the host to resume."}
+            </div>
+            {isHost && onPause && (
+              <button className="primary-btn" onClick={onPause}>Resume</button>
+            )}
           </div>
         </div>
       )}

@@ -277,8 +277,10 @@ input { font: inherit; color: var(--text); }
 }
 .log-strip div { padding: 1px 0; }
 .log-strip .hand-mark { color: var(--gold); }
+/* z 20: must stay clickable above the pause veil (z 15) — the Resume
+   button lives here, and a veil that eats it locks the game forever */
 .side-controls { position: absolute; top: 16px; right: 16px; display: flex;
-  flex-direction: column; gap: 8px; z-index: 5; }
+  flex-direction: column; gap: 8px; z-index: 20; }
 .side-controls button {
   background: var(--plate); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 16px; font-size: 13px; font-weight: 500; text-align: right;
@@ -368,8 +370,9 @@ input { font: inherit; color: var(--text); }
 /* pause veil + end screen */
 .veil { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center;
   background: rgba(8, 11, 9, 0.72); backdrop-filter: blur(3px); }
-.veil .msg { font-family: var(--font-display), sans-serif; font-size: 34px; font-weight: 700; }
+.veil .msg { font-family: var(--font-display), sans-serif; font-size: 34px; font-weight: 700; text-align: center; }
 .veil .hint { color: var(--muted); margin-top: 8px; text-align: center; }
+.veil .primary-btn { width: auto; padding: 13px 44px; margin: 22px auto 0; display: block; }
 .end-wrap { height: 100vh; display: grid; place-items: center; overflow: auto; }
 .end-card { width: min(560px, 92vw); padding: 40px; }
 .end-card h1 { font-family: var(--font-display), sans-serif; font-size: 40px; margin-bottom: 4px; }
