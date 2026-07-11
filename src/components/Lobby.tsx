@@ -1,9 +1,9 @@
 "use client";
-// Entry screen. Two ways to play:
-//   Local  — hot-seat on this device (phase 1a, our debug harness)
-//   Online — join a room on the game server (phase 1b)
-// Also shows the overall (cross-session) ledger from localStorage
-// until it moves to Supabase in phase 1b.2.
+// Entry screen. Players only ever see the online room flow — the app
+// is online-only for users. Local hot-seat (phase 1a) survives as our
+// DEV-ONLY debug harness behind /?dev=local; it must never be visible
+// in the normal flow. Also shows the overall (cross-session) ledger
+// from localStorage until it moves to Supabase in phase 1b.2.
 
 import { useEffect, useState } from "react";
 import { GameConfig, SessionSummary } from "@/engine/types";
@@ -20,12 +20,14 @@ export function appendOverall(s: SessionSummary) {
 }
 
 interface Props {
+  /** true only via /?dev=local — exposes the hot-seat debug harness */
+  devLocal: boolean;
   onStartLocal: (config: GameConfig, players: SetupPlayer[]) => void;
   onJoinOnline: (room: string, myId: string, keyword: string) => void;
 }
 
-export function Lobby({ onStartLocal, onJoinOnline }: Props) {
-  const [tab, setTab] = useState<"local" | "online">("local");
+export function Lobby({ devLocal, onStartLocal, onJoinOnline }: Props) {
+  const [tab, setTab] = useState<"local" | "online">("online");
   const [room, setRoom] = useState("");
   const [name, setName] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -53,20 +55,22 @@ export function Lobby({ onStartLocal, onJoinOnline }: Props) {
         <h1>The Table <span className="suit">♠</span></h1>
         <p className="sub">Private cash game · No-Limit Hold&apos;em · chips are points, settle up after</p>
 
-        <div className="mode-tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "local"}
-            className={`mode-tab${tab === "local" ? " active" : ""}`}
-            onClick={() => setTab("local")}>
-            Local hot-seat
-          </button>
-          <button role="tab" aria-selected={tab === "online"}
-            className={`mode-tab${tab === "online" ? " active" : ""}`}
-            onClick={() => setTab("online")}>
-            Online room
-          </button>
-        </div>
+        {devLocal && (
+          <div className="mode-tabs" role="tablist">
+            <button role="tab" aria-selected={tab === "online"}
+              className={`mode-tab${tab === "online" ? " active" : ""}`}
+              onClick={() => setTab("online")}>
+              Online room
+            </button>
+            <button role="tab" aria-selected={tab === "local"}
+              className={`mode-tab${tab === "local" ? " active" : ""}`}
+              onClick={() => setTab("local")}>
+              Local hot-seat (dev)
+            </button>
+          </div>
+        )}
 
-        {tab === "local" ? (
+        {devLocal && tab === "local" ? (
           <GameSetupForm submitLabel="Deal the first hand" idMode="auto"
             onSubmit={onStartLocal} />
         ) : (

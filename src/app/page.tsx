@@ -1,8 +1,9 @@
 "use client";
 // App shell: routes between the lobby and the two game modes.
 // All game logic lives in LocalGame (hot-seat) / OnlineGame (server).
+// Players only get the online flow; hot-seat is dev-only (/?dev=local).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GameConfig } from "@/engine/types";
 import { Lobby } from "@/components/Lobby";
 import { SetupPlayer } from "@/components/GameSetupForm";
@@ -18,6 +19,13 @@ export default function Home() {
   const [screen, setScreen] = useState<Screen>({ kind: "lobby" });
   const toLobby = () => setScreen({ kind: "lobby" });
 
+  // Dev-only escape hatch for the hot-seat debug harness. Read after
+  // mount (not during render) so server and client HTML always match.
+  const [devLocal, setDevLocal] = useState(false);
+  useEffect(() => {
+    setDevLocal(new URLSearchParams(window.location.search).get("dev") === "local");
+  }, []);
+
   switch (screen.kind) {
     case "local":
       return <LocalGame config={screen.config} players={screen.players} onExit={toLobby} />;
@@ -29,6 +37,7 @@ export default function Home() {
     default:
       return (
         <Lobby
+          devLocal={devLocal}
           onStartLocal={(config, players) => setScreen({ kind: "local", config, players })}
           onJoinOnline={(room, myId, keyword) => setScreen({ kind: "online", room, myId, keyword })}
         />

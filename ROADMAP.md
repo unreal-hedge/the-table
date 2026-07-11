@@ -27,7 +27,7 @@ Goal: friends join from their own phones/laptops via one shared link. Server is 
 - [x] **Server-owned clock** — DONE. Server arms one timer per turn (deadline + 750ms network grace), re-checks the engine before firing (time bank may have moved the deadline), and applies the engine's auto check/fold + consecutive-timeout sit-out. New `timeBank` message, actor-verified like `act`. State messages carry a server timestamp so client countdowns correct for phone clock skew — displays only, the server decides. E2E: silent bot auto-acted ✅, time bank extended deadline ✅, out-of-turn timeBank rejected ✅; verified live in-browser (server folded a passive client, then auto-sat it out after 2 timeouts).
 - [ ] **Rathole prevention (spec 3.5)** — leave and rejoin the same session → must re-enter with at least the stack you left with (capped at max buy-in).
 - [ ] **Text chat** — simple room chat: small bubbles near the sender's seat for a few seconds + in the log strip. Keep last ~50 messages.
-- [x] **Keep hot-seat mode** working as "local mode" — DONE (Local tab; same TableView, engine driven locally).
+- [x] **Keep hot-seat mode** working as "local mode" — DONE, now **dev-only**: players see an online-only lobby; the hot-seat debug harness lives at `/?dev=local` (documented in CLAUDE.md). Same TableView, engine driven locally.
 - [ ] **Deploy** — frontend on Vercel, server via PartyKit. Exact commands + walk Kabir through account setup (assume never done it).
 
 **Gate:** two browsers on two devices play a full session against each other, including one mid-hand disconnect + rejoin.
