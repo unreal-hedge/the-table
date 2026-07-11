@@ -45,3 +45,4 @@ npx tsx test-engine.ts
 - **poker-ts view quirk**: a preflop folder's dead bet stays visible in `seats().betSize`, but a postflop folder's zeroes instantly (chips sit in an internal bucket until round end). `GameManager` compensates via `deadBets` — measured as the betSize that actually disappears at fold time. Don't "simplify" the before/after measurement into a flat `+= betSize`; that double-counts preflop folds.
 - Design tokens live at the top of `globals.css`. Fonts are self-hosted via @fontsource (Google Fonts fetch breaks builds).
 - **Local hot-seat mode is dev-only**: players never see it. Reach it at `/?dev=local` — it's the engine debug harness (phase 1a), kept working on purpose. The visible app is online-only.
+- **Deploys**: pushes to `main` auto-deploy the frontend (Vercel ↔ GitHub). The game server does NOT auto-deploy — after touching `party/` or `shared/`, redeploy it manually with `npm run party:deploy`.
