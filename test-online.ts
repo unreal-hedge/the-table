@@ -19,6 +19,9 @@
 //  10. disconnect grace (Step 7, spec 8.2): a player whose LAST
 //      connection drops vanishes from presence, and after the grace
 //      window the server sits them out; the game plays on without them
+//  11. rathole prevention (Step 8, spec 3.5): after end→start in the
+//      same room, re-entering below your last cash-out (capped at max
+//      buy-in) is refused; a compliant restart deals normally
 //
 // Usage:  npm run party:dev   (in another terminal)
 //         npx tsx test-online.ts
@@ -41,6 +44,7 @@ const WATCHDOG_MS = 180_000;
 
 let timeoutObserved = false;      // any state's log shows a server-forced action
 let graceSitOutObserved = false;  // log shows the grace expiry sat arjun out
+let newSessionSeen = false;       // a compliant restart actually dealt hand #1
 
 const KEYWORDS: Record<string, string> = {
   kabir: "masala", arjun: "idli", dev: "dosa",
@@ -129,6 +133,8 @@ class Bot {
     this.latestHand = s.handNumber;
     if (s.log.some((l) => l.includes("timed out — auto"))) timeoutObserved = true;
     if (s.log.some((l) => l === "Arjun sits out")) graceSitOutObserved = true;
+    // a fresh hand #1 arriving after we saw "ended" = the restart dealt
+    if (this.gotEnded && s.phase === "inHand" && s.handNumber === 1) newSessionSeen = true;
 
     // hard-disconnect test: walk away without a word (spec 8.2 grace)
     if (this.opts.leaveAtHand && !this.leftDeliberately && s.handNumber >= this.opts.leaveAtHand) {
@@ -245,7 +251,8 @@ function runMallory() {
 const kabir = new Bot("kabir", "kabir", {
   isHost: true,
   misbehave: "timebank",
-  allowedErrors: ["not in the player list"], // the bad-start guard test below
+  // expected rejections: the bad-start guard + the rathole restart test
+  allowedErrors: ["not in the player list", "Rathole rule"],
 });
 const bots: Bot[] = [kabir];
 let arjun: Bot, dev1: Bot, dev2: Bot | null = null;
@@ -310,12 +317,43 @@ const watchdog = setTimeout(
   WATCHDOG_MS
 );
 
+let ratholePhaseStarted = false;
+
 const poll = setInterval(() => {
-  // done when: session ended for the LIVE actors (arjun left on purpose),
-  // dev1 kicked, arjun's grace expired, mallory rejected twice
+  // act 1 done when: session ended for the LIVE actors (arjun left on
+  // purpose), dev1 kicked, arjun's grace expired, mallory rejected twice
   if (!dev2 || !kabir.gotEnded || !dev2.gotEnded) return;
   if (!dev1.kicked || !arjun.leftDeliberately || !graceSitOutObserved) return;
   if (malloryErrors.length < 2) return;
+
+  // act 2 (Step 8): restart the room — first violating the rathole
+  // floor (richest cash-out re-enters at the 500 minimum), then compliant
+  if (!ratholePhaseStarted) {
+    ratholePhaseStarted = true;
+    const rows = kabir.gotEnded!.rows;
+    const richest = [...rows].sort((a, b) => b.stack - a.stack)[0];
+    if (richest.stack <= GAME_CONFIG.minBuyIn) {
+      fail(`test setup: nobody cashed out above the min buy-in (${richest.stack})`);
+    }
+    const violating = PLAYER_ROWS.map((p) => ({
+      ...p, buyIn: p.id === richest.id ? GAME_CONFIG.minBuyIn : GAME_CONFIG.maxBuyIn,
+    }));
+    kabir.send({ type: "host", cmd: { kind: "start", config: GAME_CONFIG, players: violating } });
+    setTimeout(() => {
+      const compliant = PLAYER_ROWS.map((p) => {
+        const row = rows.find((r) => r.id === p.id)!;
+        return {
+          ...p,
+          buyIn: Math.max(GAME_CONFIG.minBuyIn, Math.min(row.stack, GAME_CONFIG.maxBuyIn)),
+        };
+      });
+      kabir.send({ type: "host", cmd: { kind: "start", config: GAME_CONFIG, players: compliant } });
+    }, 700);
+    return;
+  }
+  if (!kabir.errorsReceived.some((e) => e.includes("Rathole rule"))) return;
+  if (!newSessionSeen) return;
+
   clearInterval(poll);
   clearTimeout(watchdog);
 
@@ -371,6 +409,7 @@ const poll = setInterval(() => {
   console.log(`takeover: dev1 kicked at hand ≥${TAKEOVER_AT_HAND}, silent after (${dev1.statesAfterKick} leaks) · dev2 played on ✅`);
   console.log("server clock timed out a silent player ✅ · time bank extended deadline ✅ · out-of-turn timeBank rejected ✅");
   console.log(`disconnect grace: arjun left at hand ${LEAVE_AT_HAND}, presence dropped him, grace sat him out, game finished without him ✅`);
+  console.log("rathole: short re-entry after cash-out refused, compliant restart dealt hand #1 ✅");
   console.log("ledger nets 0 ✅");
   console.log("ONLINE E2E PASS ✅");
   [...bots].forEach((b) => b.ws.close());

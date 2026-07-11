@@ -22,7 +22,7 @@
 // ============================================================
 
 import { routePartykitRequest, Server, type Connection } from "partyserver";
-import { GameManager } from "../shared/engine/manager";
+import { GameManager, fmt } from "../shared/engine/manager";
 import type { GameState } from "../shared/engine/types";
 import { filterStateFor } from "./filter";
 import {
@@ -70,6 +70,12 @@ export class TableServer extends Server<Env> {
   /** Disconnect grace (Step 7, spec 8.2): playerId → pending sit-out. */
   private graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private disconnectGraceMs = DEFAULT_DISCONNECT_GRACE_MS;
+  /** Rathole prevention (Step 8, spec 3.5): playerId → stack they left
+   *  the last session with. WITHIN a session ratholing is structurally
+   *  impossible (seats + stacks persist in the engine for the session's
+   *  life); the only hole is re-entering short after an end→start in
+   *  the same room, and this map closes it. */
+  private exitStacks = new Map<string, number>();
 
   // ---------- connection lifecycle ----------
 
@@ -292,6 +298,21 @@ export class TableServer extends Server<Env> {
           const kw = String(p.keyword ?? "").trim().toLowerCase();
           if (!kw) return this.error(conn, `Player "${p.name}" needs a keyword`);
         }
+        // Rathole rule (spec 3.5): whoever cashed out of the last session
+        // in this room must re-enter with at least that stack, capped at
+        // the new game's max buy-in. Refuse loudly rather than silently
+        // adjusting anyone's money.
+        for (const p of cmd.players) {
+          const exit = this.exitStacks.get(p.id);
+          if (exit === undefined) continue;
+          const floor = Math.min(exit, cmd.config.maxBuyIn);
+          if (p.buyIn < floor) {
+            return this.error(
+              conn,
+              `Rathole rule (3.5): ${p.name} left with ${fmt(exit)} and must re-enter with at least ${fmt(floor)}`
+            );
+          }
+        }
         for (const p of cmd.players) {
           const kw = String(p.keyword ?? "").trim().toLowerCase();
           const existing = this.roster.get(p.id);
@@ -343,6 +364,9 @@ export class TableServer extends Server<Env> {
         if (!this.gm) return this.error(conn, "No game running");
         for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);
         const summary = this.gm.stop();
+        // remember what everyone cashed out with — the rathole floor for
+        // any future session in this room (3.5)
+        for (const row of summary.rows) this.exitStacks.set(row.id, row.stack);
         this.broadcastMsg({ type: "ended", summary });
         break;
       }
