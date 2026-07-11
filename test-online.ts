@@ -59,7 +59,9 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-function wsUrl() { return `ws://${HOST}/parties/table-server/${ROOM}`; }
+// local dev speaks ws://, anything deployed (workers.dev) speaks wss://
+const WS_SCHEME = /^(127\.0\.0\.1|localhost)/.test(HOST) ? "ws" : "wss";
+function wsUrl() { return `${WS_SCHEME}://${HOST}/parties/table-server/${ROOM}`; }
 
 class Bot {
   ws: WebSocket;
