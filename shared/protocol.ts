@@ -49,7 +49,12 @@ export interface StartingPlayer {
 
 // ---------- server → client ----------
 
-export interface ChatEntry { from: string; text: string; at: number }
+export interface ChatEntry {
+  from: string;   // display name at send time
+  fromId: string; // stable player id — bubbles anchor to the seat by this
+  text: string;
+  at: number;
+}
 
 export type ServerMessage =
   | { type: "you"; playerId: string; seat: number | null; host: boolean }

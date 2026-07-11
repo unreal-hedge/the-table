@@ -22,19 +22,23 @@
 //  11. rathole prevention (Step 8, spec 3.5): after end→start in the
 //      same room, re-entering below your last cash-out (capped at max
 //      buy-in) is refused; a compliant restart deals normally
+//  12. chat (Step 9): a message reaches everyone live with the right
+//      sender id/name, and a LATE joiner receives it via chatHistory
 //
 // Usage:  npm run party:dev   (in another terminal)
 //         npx tsx test-online.ts
 // ============================================================
 
 import type { GameState, SessionSummary } from "./shared/engine/types";
-import type { ClientMessage, ServerMessage } from "./shared/protocol";
+import type { ChatEntry, ClientMessage, ServerMessage } from "./shared/protocol";
 import { INVALID_LOGIN } from "./shared/protocol";
 
 const HOST = process.env.PARTY_HOST ?? "127.0.0.1:8787";
 const ROOM = `e2e-${Date.now()}`; // fresh room per run — no stale state
 const HANDS_TO_PLAY = 10;
 const TAKEOVER_AT_HAND = 3;
+const CHAT_AT_HAND = 2;       // arjun chats early — dev2 joins later, must get history
+const CHAT_TEXT = "gg boys";
 const TIMEBANK_AT_HAND = 4;   // arjun extends his clock once
 const GO_SILENT_AT_HAND = 5;  // dev2 skips a turn — server must time him out
 const LEAVE_AT_HAND = 7;      // arjun hard-disconnects — grace must sit him out
@@ -70,7 +74,9 @@ class Bot {
   rejectionSeen = false;         // the expected error for this bot's misbehavior test
   errorsReceived: string[] = []; // every whitelisted rejection, verbatim
   lastPresence: string[] = [];   // latest presence ids this bot has seen
+  chats: ChatEntry[] = [];       // everything received via chat + chatHistory
   leftDeliberately = false;
+  private chatSent = false;
   private misbehaved = false;
   private lastRebuyHand = 0;
 
@@ -88,6 +94,7 @@ class Bot {
       useTimeBank?: boolean;  // legit +30s on own turn at TIMEBANK_AT_HAND
       goSilent?: boolean;     // skip one turn at GO_SILENT_AT_HAND — server must act
       leaveAtHand?: number;   // hard-disconnect at this hand — grace test
+      chatAtHand?: number;    // send CHAT_TEXT once at this hand
       allowedErrors?: string[]; // extra expected rejections beyond the standard two
     }
   ) {
@@ -117,6 +124,8 @@ class Bot {
       case "ended":  this.gotEnded = msg.summary; break;
       case "kicked": this.kicked = true; break;
       case "presence": this.lastPresence = msg.members.map((m) => m.id); break;
+      case "chat":        this.chats.push(msg.entry); break;
+      case "chatHistory": this.chats.push(...msg.entries); break;
       case "error": {
         const allowed = ["Not your turn", "Host only", ...(this.opts.allowedErrors ?? [])];
         if (allowed.some((a) => msg.msg.includes(a))) {
@@ -135,6 +144,11 @@ class Bot {
     if (s.log.some((l) => l === "Arjun sits out")) graceSitOutObserved = true;
     // a fresh hand #1 arriving after we saw "ended" = the restart dealt
     if (this.gotEnded && s.phase === "inHand" && s.handNumber === 1) newSessionSeen = true;
+
+    if (this.opts.chatAtHand && !this.chatSent && s.handNumber >= this.opts.chatAtHand) {
+      this.chatSent = true;
+      this.send({ type: "chat", text: CHAT_TEXT });
+    }
 
     // hard-disconnect test: walk away without a word (spec 8.2 grace)
     if (this.opts.leaveAtHand && !this.leftDeliberately && s.handNumber >= this.opts.leaveAtHand) {
@@ -292,6 +306,7 @@ setTimeout(() => {
   // and finally hard-disconnects — the grace window must sit him out
   arjun = new Bot("arjun", "arjun", {
     misbehave: "host", useTimeBank: true, leaveAtHand: LEAVE_AT_HAND,
+    chatAtHand: CHAT_AT_HAND,
   });
   dev1 = new Bot("dev", "dev1", { misbehave: "act" }); // acts out of turn
   bots.push(arjun, dev1);
@@ -382,6 +397,16 @@ const poll = setInterval(() => {
     fail("host start WITHOUT the host in the player list was NOT rejected");
   }
 
+  // Step 9: chat — live delivery with correct identity, history to late joiners
+  const isArjunsLine = (e: ChatEntry) =>
+    e.fromId === "arjun" && e.from === "Arjun" && e.text === CHAT_TEXT;
+  if (!kabir.chats.some(isArjunsLine)) {
+    fail("kabir never received arjun's chat message live");
+  }
+  if (!dev2!.chats.some(isArjunsLine)) {
+    fail("dev2 joined after the chat but chatHistory didn't deliver it");
+  }
+
   // Step 7: disconnect grace
   if (kabir.lastPresence.includes("arjun")) {
     fail("arjun closed his socket but still shows in presence");
@@ -410,6 +435,7 @@ const poll = setInterval(() => {
   console.log("server clock timed out a silent player ✅ · time bank extended deadline ✅ · out-of-turn timeBank rejected ✅");
   console.log(`disconnect grace: arjun left at hand ${LEAVE_AT_HAND}, presence dropped him, grace sat him out, game finished without him ✅`);
   console.log("rathole: short re-entry after cash-out refused, compliant restart dealt hand #1 ✅");
+  console.log("chat: delivered live with correct identity, and to a late joiner via history ✅");
   console.log("ledger nets 0 ✅");
   console.log("ONLINE E2E PASS ✅");
   [...bots].forEach((b) => b.ws.close());

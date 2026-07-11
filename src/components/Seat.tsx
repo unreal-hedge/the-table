@@ -11,11 +11,12 @@ interface Props {
   peeking: boolean;
   peekable?: boolean;            // hot-seat only; online has no peek flow
   offline?: boolean;             // online: no live connection (grace running)
+  bubble?: string | null;        // recent chat line, floats above the seat
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, onPeek, winBadge }: Props) {
+export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, onPeek, winBadge }: Props) {
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
@@ -25,6 +26,7 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = 
         className={`seat${v.isTurn ? " turn" : ""}${v.folded ? " folded" : ""}${v.sittingOut ? " out" : ""}`}
         style={{ left: `${x}%`, top: `${y}%` }}
       >
+        {bubble && <div className="chat-bubble">{bubble}</div>}
         <div className="seat-cards">
           {/* online: server strips opponents' holeCards to null — still
               show backs, an in-hand player must LOOK in the hand */}

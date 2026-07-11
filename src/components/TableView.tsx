@@ -10,10 +10,15 @@
 import { ReactNode, useEffect, useState } from "react";
 import { fmt } from "@/engine/manager";
 import { GameState, LedgerRow, PlayerAction } from "@/engine/types";
+import { ChatEntry } from "@shared/protocol";
 import { Seat } from "./Seat";
 import { CardFace } from "./CardFace";
 import { ActionBar } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
+import { ChatPanel } from "./ChatPanel";
+
+// how long a chat line floats as a bubble next to its sender's seat
+const BUBBLE_MS = 4500;
 
 // seat positions: ellipse in scene %, seat 0 at the bottom, clockwise
 function seatPos(i: number, n: number) {
@@ -33,6 +38,9 @@ interface Props {
   ledgerRows: LedgerRow[];
   clockOffsetMs?: number;        // serverNow - clientNow (display-only skew fix)
   connectedIds?: Set<string>;    // online: ids with a live connection (presence)
+  chat?: ChatEntry[];            // online: room chat (bubbles + panel)
+  myId?: string;                 // online: for styling own chat lines
+  onChat?: (text: string) => void;
   corner?: ReactNode;            // online: connection pill + room line
   overlay?: ReactNode;           // online: disconnect veil / error toast
   onAct: (a: PlayerAction, amount?: number) => void;
@@ -46,11 +54,13 @@ interface Props {
 
 export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
-  connectedIds, corner, overlay,
+  connectedIds, chat, myId, onChat, corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onAddChips, onSitToggle,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
+  const [showChat, setShowChat] = useState(false);
+  const [chatSeenCount, setChatSeenCount] = useState(0);
 
   // display-only countdown tick (timeout decisions live elsewhere:
   // hotseat → LocalGame's loop; online → the server, Step 6)
@@ -74,6 +84,15 @@ export function TableView({
   );
   const sittingOut: Record<string, boolean> = {};
   for (const seat of s.seats) sittingOut[seat.id] = seat.sittingOut;
+
+  // freshest chat line per seat, young enough to float as a bubble
+  const bubbleBySeatId = new Map<string, string>();
+  if (chat) {
+    for (const e of chat) {
+      if (displayNow - e.at < BUBBLE_MS) bubbleBySeatId.set(e.fromId, e.text);
+    }
+  }
+  const unreadChat = (chat?.length ?? 0) - chatSeenCount;
 
   const myTurn = mode === "hotseat" || (mySeat != null && s.playerToAct === mySeat);
   const canShow = mode === "hotseat"
@@ -116,6 +135,7 @@ export function TableView({
             peeking={peeking}
             peekable={mode === "hotseat"}
             offline={connectedIds ? !connectedIds.has(v.id) : false}
+            bubble={bubbleBySeatId.get(v.id) ?? null}
             onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
             winBadge={winBySeat.get(v.seat) ?? null}
           />
@@ -140,6 +160,23 @@ export function TableView({
             <div className="hint">Clock is frozen. Host resumes from the top-right.</div>
           </div>
         </div>
+      )}
+
+      {onChat && (
+        <button
+          className="chat-fab"
+          aria-label="Chat"
+          onClick={() => {
+            setShowChat(!showChat);
+            setChatSeenCount(chat?.length ?? 0);
+          }}
+        >
+          💬{!showChat && unreadChat > 0 && <span className="chat-dot" />}
+        </button>
+      )}
+      {showChat && onChat && (
+        <ChatPanel entries={chat ?? []} myId={myId ?? ""}
+          onSend={onChat} onClose={() => { setShowChat(false); setChatSeenCount(chat?.length ?? 0); }} />
       )}
 
       {showLedger && (

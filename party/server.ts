@@ -261,7 +261,7 @@ export class TableServer extends Server<Env> {
     const clean = String(text ?? "").trim().slice(0, CHAT_MAX_LENGTH);
     if (!clean) return;
     const entry: ChatEntry = {
-      from: this.nameOf(playerId), text: clean, at: Date.now(),
+      from: this.nameOf(playerId), fromId: playerId, text: clean, at: Date.now(),
     };
     this.chat.push(entry);
     if (this.chat.length > CHAT_HISTORY_LIMIT) {
