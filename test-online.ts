@@ -87,6 +87,8 @@ class Bot {
   timeBankExtended = false;
   private wentSilent = false;
 
+  private sendQueue: ClientMessage[] = [];
+
   constructor(
     public id: string,
     public label: string, // "dev1"/"dev2" — two bots may share an id
@@ -101,16 +103,22 @@ class Bot {
     }
   ) {
     this.ws = new WebSocket(wsUrl());
-    this.ws.addEventListener("open", () =>
-      this.send({ type: "join", playerId: id, keyword: KEYWORDS[id] })
-    );
+    this.ws.addEventListener("open", () => {
+      this.send({ type: "join", playerId: id, keyword: KEYWORDS[id] });
+      // real-internet latency: flush anything queued while CONNECTING
+      for (const m of this.sendQueue) this.ws.send(JSON.stringify(m));
+      this.sendQueue = [];
+    });
     this.ws.addEventListener("message", (e) => this.onMessage(String(e.data)));
     this.ws.addEventListener("error", () => {
       if (!this.kicked) fail(`${this.label}: socket error — is the server running?`);
     });
   }
 
-  send(msg: ClientMessage) { this.ws.send(JSON.stringify(msg)); }
+  send(msg: ClientMessage) {
+    if (this.ws.readyState === WebSocket.CONNECTING) this.sendQueue.push(msg);
+    else this.ws.send(JSON.stringify(msg));
+  }
 
   private onMessage(raw: string) {
     const msg: ServerMessage = JSON.parse(raw);

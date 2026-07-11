@@ -28,7 +28,12 @@ Goal: friends join from their own phones/laptops via one shared link. Server is 
 - [x] **Rathole prevention (spec 3.5)** — DONE. Within a session it's structurally impossible (seats + stacks persist in the engine for the session's life, through disconnects/takeovers/sit-outs). The real hole was end→start in the same room: the server now records everyone's cash-out stack at session end and refuses any restart where a returning player buys in below `min(exitStack, maxBuyIn)`, naming the violator and the required floor. E2E: richest cash-out re-entering at the minimum is refused; compliant restart deals hand #1.
 - [x] **Text chat** — DONE. Bubbles float above the sender's seat for ~4.5s (anchored by player id via `fromId` added to ChatEntry); a 💬 button with an unread dot opens a compact chat panel (list + input, server keeps last 50, history delivered on join). *Deviation from the letter of the spec, flagged:* chat lives in its own panel rather than interleaved into the dealer log strip — the dealer log has no timestamps so honest interleaving isn't possible, and the panel also works on phones where the log strip is hidden. E2E: live delivery with correct identity + history to a late joiner.
 - [x] **Keep hot-seat mode** working as "local mode" — DONE, now **dev-only**: players see an online-only lobby; the hot-seat debug harness lives at `/?dev=local` (documented in CLAUDE.md). Same TableView, engine driven locally.
-- [ ] **Deploy** — frontend on Vercel, server via PartyKit. Exact commands + walk Kabir through account setup (assume never done it).
+- [x] **Deploy** — DONE.
+  - Frontend: **https://poker-hazel-tau.vercel.app** (Vercel, project `poker`). Redeploy: `npx vercel --prod --yes`.
+  - Game server: **https://the-table.kabir31vazirani-f26.workers.dev** (Cloudflare Workers + Durable Objects, free tier). Redeploy: `npm run party:deploy`.
+  - Wiring: Vercel env `NEXT_PUBLIC_PARTY_HOST=the-table.kabir31vazirani-f26.workers.dev` (production). Changing it requires a redeploy (baked at build).
+  - Verified: full 12-scenario E2E passed against the deployed server over wss; deployed JS bundle confirmed to carry the prod host (and not the localhost default).
+  - Deploy fixes along the way: workers-types pinned to v4 + npm override (partyserver/wrangler peer conflict); E2E queues sends until socket open (real-internet latency).
 
 **Gate:** two browsers on two devices play a full session against each other, including one mid-hand disconnect + rejoin.
 
