@@ -120,6 +120,7 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
       isHost={isHost}
       ledgerRows={r.ledger}
       clockOffsetMs={r.clockSkewMs}
+      connectedIds={new Set(r.members.map((m) => m.id))}
       corner={
         <div className="net-corner">
           <ConnPill status={r.status} />

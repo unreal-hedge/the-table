@@ -16,6 +16,9 @@
 //      is auto-acted within actionTimeSec + grace (Step 6)
 //   9. timeBank: the actor can extend their deadline; anyone else
 //      gets "Not your turn"
+//  10. disconnect grace (Step 7, spec 8.2): a player whose LAST
+//      connection drops vanishes from presence, and after the grace
+//      window the server sits them out; the game plays on without them
 //
 // Usage:  npm run party:dev   (in another terminal)
 //         npx tsx test-online.ts
@@ -31,10 +34,13 @@ const HANDS_TO_PLAY = 10;
 const TAKEOVER_AT_HAND = 3;
 const TIMEBANK_AT_HAND = 4;   // arjun extends his clock once
 const GO_SILENT_AT_HAND = 5;  // dev2 skips a turn — server must time him out
+const LEAVE_AT_HAND = 7;      // arjun hard-disconnects — grace must sit him out
 const ACTION_TIME_SEC = 5;    // short clock so the timeout test stays fast
+const DISCONNECT_GRACE_MS = 3000; // test-sized stand-in for the 2-min default
 const WATCHDOG_MS = 180_000;
 
-let timeoutObserved = false;  // any state's log shows a server-forced action
+let timeoutObserved = false;      // any state's log shows a server-forced action
+let graceSitOutObserved = false;  // log shows the grace expiry sat arjun out
 
 const KEYWORDS: Record<string, string> = {
   kabir: "masala", arjun: "idli", dev: "dosa",
@@ -59,6 +65,8 @@ class Bot {
   latestHand = 0;
   rejectionSeen = false;         // the expected error for this bot's misbehavior test
   errorsReceived: string[] = []; // every whitelisted rejection, verbatim
+  lastPresence: string[] = [];   // latest presence ids this bot has seen
+  leftDeliberately = false;
   private misbehaved = false;
   private lastRebuyHand = 0;
 
@@ -75,6 +83,7 @@ class Bot {
       misbehave?: "act" | "host" | "timebank" | null;
       useTimeBank?: boolean;  // legit +30s on own turn at TIMEBANK_AT_HAND
       goSilent?: boolean;     // skip one turn at GO_SILENT_AT_HAND — server must act
+      leaveAtHand?: number;   // hard-disconnect at this hand — grace test
       allowedErrors?: string[]; // extra expected rejections beyond the standard two
     }
   ) {
@@ -103,6 +112,7 @@ class Bot {
       case "ledger": this.ledgerRows = msg.rows.length; break;
       case "ended":  this.gotEnded = msg.summary; break;
       case "kicked": this.kicked = true; break;
+      case "presence": this.lastPresence = msg.members.map((m) => m.id); break;
       case "error": {
         const allowed = ["Not your turn", "Host only", ...(this.opts.allowedErrors ?? [])];
         if (allowed.some((a) => msg.msg.includes(a))) {
@@ -118,6 +128,14 @@ class Bot {
     this.seat = s.seats.find((x) => x.id === this.id)?.seat ?? null;
     this.latestHand = s.handNumber;
     if (s.log.some((l) => l.includes("timed out — auto"))) timeoutObserved = true;
+    if (s.log.some((l) => l === "Arjun sits out")) graceSitOutObserved = true;
+
+    // hard-disconnect test: walk away without a word (spec 8.2 grace)
+    if (this.opts.leaveAtHand && !this.leftDeliberately && s.handNumber >= this.opts.leaveAtHand) {
+      this.leftDeliberately = true;
+      this.ws.close();
+      return;
+    }
 
     // host tops up busted players between hands (once per hand end) —
     // without this, two bust-outs leave <2 eligible and the game
@@ -255,13 +273,19 @@ setTimeout(() => {
 setTimeout(() => {
   kabir.send({
     type: "host",
-    cmd: { kind: "start", config: GAME_CONFIG, players: PLAYER_ROWS },
+    cmd: {
+      kind: "start", config: GAME_CONFIG, players: PLAYER_ROWS,
+      disconnectGraceMs: DISCONNECT_GRACE_MS,
+    },
   });
 }, 1200);
 
 setTimeout(() => {
-  // arjun: tries a host command (bounce) + later a LEGIT time bank (extend)
-  arjun = new Bot("arjun", "arjun", { misbehave: "host", useTimeBank: true });
+  // arjun: tries a host command (bounce), later a LEGIT time bank (extend),
+  // and finally hard-disconnects — the grace window must sit him out
+  arjun = new Bot("arjun", "arjun", {
+    misbehave: "host", useTimeBank: true, leaveAtHand: LEAVE_AT_HAND,
+  });
   dev1 = new Bot("dev", "dev1", { misbehave: "act" }); // acts out of turn
   bots.push(arjun, dev1);
 }, 2000);
@@ -287,9 +311,10 @@ const watchdog = setTimeout(
 );
 
 const poll = setInterval(() => {
-  // done when: session ended for all LIVE actors, dev1 kicked, mallory rejected twice
-  if (!dev2 || !kabir.gotEnded || !arjun.gotEnded || !dev2.gotEnded) return;
-  if (!dev1.kicked) return;
+  // done when: session ended for the LIVE actors (arjun left on purpose),
+  // dev1 kicked, arjun's grace expired, mallory rejected twice
+  if (!dev2 || !kabir.gotEnded || !dev2.gotEnded) return;
+  if (!dev1.kicked || !arjun.leftDeliberately || !graceSitOutObserved) return;
   if (malloryErrors.length < 2) return;
   clearInterval(poll);
   clearTimeout(watchdog);
@@ -319,6 +344,13 @@ const poll = setInterval(() => {
     fail("host start WITHOUT the host in the player list was NOT rejected");
   }
 
+  // Step 7: disconnect grace
+  if (kabir.lastPresence.includes("arjun")) {
+    fail("arjun closed his socket but still shows in presence");
+  }
+  if (!graceSitOutObserved) fail("grace expiry never sat arjun out");
+  if (sum.handsPlayed < HANDS_TO_PLAY) fail("game did not continue after arjun left");
+
   // condition 6: takeover — old connection silent after kick
   if (dev1.statesAfterKick > 0) {
     fail(`dev1 received ${dev1.statesAfterKick} states AFTER being kicked — two live connections on one seat`);
@@ -338,6 +370,7 @@ const poll = setInterval(() => {
   console.log("out-of-turn rejected ✅ · non-host rejected ✅ · identical invalid logins ✅");
   console.log(`takeover: dev1 kicked at hand ≥${TAKEOVER_AT_HAND}, silent after (${dev1.statesAfterKick} leaks) · dev2 played on ✅`);
   console.log("server clock timed out a silent player ✅ · time bank extended deadline ✅ · out-of-turn timeBank rejected ✅");
+  console.log(`disconnect grace: arjun left at hand ${LEAVE_AT_HAND}, presence dropped him, grace sat him out, game finished without him ✅`);
   console.log("ledger nets 0 ✅");
   console.log("ONLINE E2E PASS ✅");
   [...bots].forEach((b) => b.ws.close());

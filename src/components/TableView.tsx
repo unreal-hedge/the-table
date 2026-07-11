@@ -32,6 +32,7 @@ interface Props {
   isHost: boolean;               // pause/end controls + ledger editing
   ledgerRows: LedgerRow[];
   clockOffsetMs?: number;        // serverNow - clientNow (display-only skew fix)
+  connectedIds?: Set<string>;    // online: ids with a live connection (presence)
   corner?: ReactNode;            // online: connection pill + room line
   overlay?: ReactNode;           // online: disconnect veil / error toast
   onAct: (a: PlayerAction, amount?: number) => void;
@@ -45,7 +46,7 @@ interface Props {
 
 export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
-  corner, overlay,
+  connectedIds, corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onAddChips, onSitToggle,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
@@ -114,6 +115,7 @@ export function TableView({
             timerPct={v.isTurn ? timerPct : null}
             peeking={peeking}
             peekable={mode === "hotseat"}
+            offline={connectedIds ? !connectedIds.has(v.id) : false}
             onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
             winBadge={winBySeat.get(v.seat) ?? null}
           />

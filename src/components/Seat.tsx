@@ -10,11 +10,12 @@ interface Props {
   timerPct: number | null;       // 0..1 remaining, only for the actor
   peeking: boolean;
   peekable?: boolean;            // hot-seat only; online has no peek flow
+  offline?: boolean;             // online: no live connection (grace running)
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, onPeek, winBadge }: Props) {
+export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, onPeek, winBadge }: Props) {
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
@@ -33,7 +34,10 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = 
         </div>
         <div className="plate">
           {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
-          <div className="name">{v.name}</div>
+          <div className="name">
+            {v.name}
+            {offline && !v.sittingOut && <span className="offline-tag">offline</span>}
+          </div>
           <div className="stack">{v.sittingOut ? "sitting out" : fmt(v.stack)}</div>
           {v.isTurn && timerPct != null && (
             <div className="timer-track">

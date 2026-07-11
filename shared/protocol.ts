@@ -25,7 +25,14 @@ export type ClientMessage =
   | { type: "host"; cmd: HostCommand };
 
 export type HostCommand =
-  | { kind: "start"; config: GameConfig; players: StartingPlayer[] }
+  | {
+      kind: "start";
+      config: GameConfig;
+      players: StartingPlayer[];
+      /** Disconnect grace before auto sit-out (spec 8.2). Defaults to
+       *  2 minutes; overridable so tests don't wait that long. */
+      disconnectGraceMs?: number;
+    }
   | { kind: "pause" }     // toggles pause/resume (spec 7.2)
   | { kind: "dealNext" }  // manual deal when auto-deal is waiting (e.g. after rebuys)
   | { kind: "addChips"; playerId: string; amount: number } // rebuy approval (3.4)

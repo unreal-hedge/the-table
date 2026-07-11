@@ -42,6 +42,9 @@ const HAND_END_PAUSE_MS = 4200;
 // check/fold — covers network latency so a buzzer-beater call isn't
 // unfairly beaten by the server's own clock (Step 6, spec 5.3).
 const CLOCK_GRACE_MS = 750;
+// How long a seated player may be fully disconnected before the server
+// sits them out (spec 8.2). Overridable per session for tests.
+const DEFAULT_DISCONNECT_GRACE_MS = 120_000;
 
 export class TableServer extends Server<Env> {
   // NOT hibernatable: the GameManager (deck, hidden cards, clocks)
@@ -64,6 +67,9 @@ export class TableServer extends Server<Env> {
   /** THE action clock (Step 6): the server owns timeouts now; client
    *  countdowns are display only. Re-armed after every mutation. */
   private clockTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Disconnect grace (Step 7, spec 8.2): playerId → pending sit-out. */
+  private graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private disconnectGraceMs = DEFAULT_DISCONNECT_GRACE_MS;
 
   // ---------- connection lifecycle ----------
 
@@ -73,11 +79,38 @@ export class TableServer extends Server<Env> {
   }
 
   onClose(conn: Connection) {
-    // Step 7 adds the 2-min disconnect grace; for now just drop the
-    // mapping. Their seat/stack live in the GameManager, so rejoining
-    // with the same playerId picks the seat right back up.
+    const playerId = this.joined.get(conn.id);
     this.joined.delete(conn.id);
     this.broadcastPresence();
+    if (playerId === undefined) return;
+
+    // Disconnect grace (spec 8.2): only when that was the player's LAST
+    // live connection (a takeover kick leaves the new device connected),
+    // and only for someone actually playing right now.
+    for (const id of this.joined.values()) {
+      if (id === playerId) return; // still connected elsewhere
+    }
+    if (!this.gm) return;
+    const st = this.gm.state();
+    if (st.phase === "ended") return;
+    const seated = st.seats.find((s) => s.id === playerId);
+    if (!seated || seated.sittingOut) return;
+
+    this.clearGrace(playerId);
+    this.pushLogQuiet(`${playerId} disconnected — ${this.disconnectGraceMs / 1000}s grace`);
+    this.graceTimers.set(playerId, setTimeout(() => {
+      this.graceTimers.delete(playerId);
+      if (!this.gm || this.gm.state().phase === "ended") return;
+      // still gone after the grace: the engine sits them out (takes
+      // effect next deal; the action clock covers their current hand)
+      this.gm.toggleSitOut(playerId, true);
+      this.afterMutation();
+    }, this.disconnectGraceMs));
+  }
+
+  private clearGrace(playerId: string) {
+    const t = this.graceTimers.get(playerId);
+    if (t) { clearTimeout(t); this.graceTimers.delete(playerId); }
   }
 
   // ---------- message handling ----------
@@ -138,6 +171,9 @@ export class TableServer extends Server<Env> {
         other.close(1000, "logged in elsewhere");
       }
     }
+
+    // back within the grace window — the pending sit-out is off (8.2)
+    this.clearGrace(id);
 
     this.joined.set(conn.id, id);
     this.send(conn, {
@@ -270,6 +306,7 @@ export class TableServer extends Server<Env> {
           const c = this.roster.get(this.creatorId);
           if (c) c.host = true;
         }
+        this.disconnectGraceMs = cmd.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS;
         try {
           this.gm = new GameManager(cmd.config, cmd.players);
           this.gm.start();
@@ -304,6 +341,7 @@ export class TableServer extends Server<Env> {
       case "sitOut":   this.gm?.toggleSitOut(cmd.playerId, cmd.out); break;
       case "end": {
         if (!this.gm) return this.error(conn, "No game running");
+        for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);
         const summary = this.gm.stop();
         this.broadcastMsg({ type: "ended", summary });
         break;

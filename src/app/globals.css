@@ -201,6 +201,12 @@ input { font: inherit; color: var(--text); }
 .seat.folded { opacity: 0.45; }
 .seat.out .plate { border-style: dashed; opacity: 0.6; }
 .plate .name { font-weight: 600; font-size: 14px; }
+.offline-tag {
+  margin-left: 6px; font-size: 9px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--danger);
+  border: 1px solid rgba(224, 100, 91, 0.45); border-radius: 8px; padding: 1px 6px;
+  animation: connPulse 1.2s ease infinite;
+}
 .plate .stack { font-family: var(--font-mono), monospace; font-size: 13px; color: var(--gold); }
 .timer-track { height: 3px; border-radius: 2px; background: rgba(242, 236, 221, 0.12);
   margin-top: 6px; overflow: hidden; }
