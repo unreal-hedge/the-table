@@ -13,8 +13,8 @@ Double Flop Tex is a six-card bomb-pot variant played on **two boards** with
 
 ### Deal & betting sequence
 
-1. Before any cards are dealt: every player antes a fixed **2 BB**. This is a
-   bomb pot — **there is no preflop betting round**.
+1. Before any cards are dealt: every player antes a fixed **1 BB (200)**. This
+   is a bomb pot — **there is no preflop betting round**.
 2. Each player is dealt **6 cards**.
 3. Burn 1 → both flops (**Flop A**, **Flop B**) revealed **simultaneously**
    (3 cards each).
@@ -29,8 +29,17 @@ There are exactly **3 post-deal betting rounds**. One shared pot throughout.
 Betting is structurally normal — the two boards do not create separate betting
 streams, they only change what players are betting *about*.
 
-**Short stack who cannot cover the 2BB ante:** goes **all-in for whatever they
-have** and plays for a side pot. Never dealt out.
+**Bet sizing.** No blinds are posted (there is no preflop round); the big blind
+of 200 only sets the ante and the minimum bet. Each post-deal round opens with
+no live bet, and the **first live seat left of the button acts first** (standard
+Hold'em order). Opening bets and raises are No-Limit, capped at the player's
+stack, with a **minimum of 200 (1 BB)** and in **50-chip increments** (200, 250,
+300, …); raises additionally follow standard No-Limit min-raise sizing. (The
+50-chip *slider* is a Phase 1E UI change — the engine accepts any legal 50-step
+amount now so 1E never has to touch it.)
+
+**Short stack who cannot cover the 1 BB ante (200):** goes **all-in for whatever
+they have** and plays for a side pot. Never dealt out.
 
 **Folding:** any player who folds is out of the hand entirely and does not
 reach showdown. If all but one player folds, that player wins the pot

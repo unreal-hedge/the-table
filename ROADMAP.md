@@ -73,6 +73,19 @@ Split out of 1D. Scoped to **normal Hold'em all-ins only** — not Double Flop T
 
 ---
 
+## LATER — SHARED SESSIONCORE (tech debt)
+
+Deferred by decision at the 1D kickoff: NLHE's `GameManager` and DFT's
+`DoubleFlopManager` are separate classes that duplicate the session scaffolding
+(ledger, sit-out, time bank, pause, rebuy, button rotation). We did NOT extract
+a shared base up front, to avoid risking a regression in the deployed-but-not-
+yet-gate-passed NLHE engine. Once both variants work and are gate-passed,
+extract a shared `SessionCore` both engines build on, so ledger-conservation
+logic lives in ONE place. Until then, `test-engine.ts` and `test-dft.ts`
+independently guard each engine's chip conservation.
+
+---
+
 ## PHASE 2 — 3D TABLE
 
 react-three-fiber scene replacing the 2D table, reading the exact same `GameState`: oval table, free orbit camera, chat as speech bubbles above characters, character avatars per friend (art pipeline decided when we get here — ask Kabir). The 2D UI stays available as a fallback toggle.
