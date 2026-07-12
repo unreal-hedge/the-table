@@ -16,18 +16,23 @@ Double Flop Tex is a six-card bomb-pot variant played on **two boards** with
 1. Before any cards are dealt: every player antes a fixed **1 BB (200)**. This
    is a bomb pot — **there is no preflop betting round**.
 2. Each player is dealt **6 cards**.
-3. Burn 1 → both flops (**Flop A**, **Flop B**) revealed **simultaneously**
-   (3 cards each).
+3. Both flops (**Flop A**, **Flop B**) revealed **simultaneously** (3 cards each).
 4. **BETTING ROUND 1.**
-5. Burn 1 per board → both turns dealt face-down.
+5. Both turns dealt face-down.
 6. Both turns revealed. **BETTING ROUND 2.**
-7. Burn 1 per board → both rivers dealt face-down.
+7. Both rivers dealt face-down.
 8. Both rivers revealed. **BETTING ROUND 3.**
 9. Showdown.
 
 There are exactly **3 post-deal betting rounds**. One shared pot throughout.
 Betting is structurally normal — the two boards do not create separate betting
 streams, they only change what players are betting *about*.
+
+**No burn cards; 7-max.** DFT deals **no burns** — a burn is a physical-casino
+anti-marking ritual that does nothing under a seeded digital shuffle. Dropping
+it makes the deck math exact: **7 players × 6 hole cards + two 5-card boards =
+52 cards.** DFT is therefore **7-max**; **8 players is physically impossible and
+is rejected at the config layer with a clear error.**
 
 **Bet sizing.** No blinds are posted (there is no preflop round); the big blind
 of 200 only sets the ante and the minimum bet. Each post-deal round opens with

@@ -21,7 +21,7 @@ import {
   type Arrangement, type Boards, type Decision, type PreparedContest,
 } from "./showdown";
 
-export const MAX_DFT_SEATS = 6; // one 52-card deck can't deal 6 hole cards to more
+export const MAX_DFT_SEATS = 7; // 7×6 hole + two 5-card boards = 52 exactly (no burns); 8 is impossible
 const INCREMENT = 50;
 const PICK_DECIDE_SEC = 30;
 
@@ -56,7 +56,10 @@ export class DoubleFlopManager implements TableEngine {
   constructor(config: GameConfig, starters: DftStarter[], seed: number) {
     this.config = config;
     this.rng = makeRng(seed);
-    starters.slice(0, MAX_DFT_SEATS).forEach((p, i) => {
+    if (starters.length > MAX_DFT_SEATS) {
+      throw new Error(`Double Flop Tex is ${MAX_DFT_SEATS}-max; got ${starters.length} players`);
+    }
+    starters.forEach((p, i) => {
       const stack = clamp(p.buyIn, config.minBuyIn, config.maxBuyIn);
       this.players.set(p.id, {
         id: p.id, name: p.name, seat: i, stack, buyInTotal: stack,
@@ -130,13 +133,14 @@ export class DoubleFlopManager implements TableEngine {
     const deck = new Deck(this.rng);
     const hole = new Map<number, Card[]>(order.map((s) => [s, []]));
     for (let r = 0; r < 6; r++) for (const s of order) hole.get(s)!.push(deck.draw(1)[0]);
-    deck.burn();
+    // No burns: 7 × 6 hole + two 5-card boards = 52 exactly. Burns are a
+    // physical-casino anti-marking ritual, meaningless under a seeded shuffle.
     const flopA = deck.draw(3);
     const flopB = deck.draw(3);
-    deck.burn(); const turnA = deck.draw(1)[0];
-    deck.burn(); const turnB = deck.draw(1)[0];
-    deck.burn(); const riverA = deck.draw(1)[0];
-    deck.burn(); const riverB = deck.draw(1)[0];
+    const turnA = deck.draw(1)[0];
+    const turnB = deck.draw(1)[0];
+    const riverA = deck.draw(1)[0];
+    const riverB = deck.draw(1)[0];
     return { hole, boards: { a: [...flopA, turnA, riverA], b: [...flopB, turnB, riverB] } };
   }
 

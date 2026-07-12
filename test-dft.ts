@@ -18,7 +18,7 @@ import { planShowdown, type Arrangement, type Boards } from "./shared/engine/dft
 import { strToCard } from "./shared/engine/dft/cards";
 import { DEFAULT_CONFIG, type Card, type GameConfig } from "./shared/engine/types";
 
-const ANTE = 200, MIN_BET = 200, INCREMENT = 50, MAX_DFT_SEATS = 6;
+const ANTE = 200, MIN_BET = 200, INCREMENT = 50, MAX_DFT_SEATS = 7;
 let failures = 0;
 function fail(msg: string): never { failures++; throw new Error(msg); }
 function check(name: string, cond: boolean, detail = "") {
@@ -73,7 +73,10 @@ function bettingConservationSuite(): void {
     }
     const pots = b.sidePots();
     if (pots.reduce((a, p) => a + p.amount, 0) !== b.totalPot()) leaks++;
-    for (const p of pots) for (const s of p.eligibleSeats) if (b.isFolded(s)) leaks++;
+    for (const p of pots) {
+      if (p.eligibleSeats.length === 0) leaks++; // no pot may lack a live claimant
+      for (const s of p.eligibleSeats) if (b.isFolded(s)) leaks++;
+    }
     hands++;
   }
   check(`betting-only conservation over ${hands} hands`, leaks === 0, `${leaks} leaks`);
@@ -351,6 +354,12 @@ try { edgeBothChopped(); } catch (e) { check("#edge both-chopped ran", false, St
 try { edgeThreeWayChop(); } catch (e) { check("#edge 3-way ran", false, String(e)); }
 try { edgeGuaranteed(); } catch (e) { check("#edge guaranteed ran", false, String(e)); }
 try { edgeMainSideOpposite(); } catch (e) { check("#edge main+side ran", false, String(e)); }
+check("#edge 8 players rejected at the config layer", (() => {
+  try {
+    new DoubleFlopManager(DEFAULT_CONFIG, Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, name: `P${i}`, buyIn: 1000 })), 1);
+    return false;
+  } catch { return true; }
+})());
 
 console.log(failures === 0 ? "\nDFT ENGINE TESTS PASS ✅ (Step 5 gate)" : `\nDFT ENGINE TESTS FAIL ❌ (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

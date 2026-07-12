@@ -228,19 +228,30 @@ export class DftBetting {
     const levels = [...new Set(contribs.map((c) => c.amt))].sort((a, b) => a - b);
     const pots: SidePot[] = [];
     let prev = 0;
+    let carry = 0; // dead money from all-folded layers, rolled into a real pot
     for (const level of levels) {
       const layer = level - prev;
       const inLayer = contribs.filter((c) => c.amt >= level);
       const amount = layer * inLayer.length;
       const eligible = inLayer.filter((c) => !c.folded).map((c) => c.seat).sort((a, b) => a - b);
       if (amount > 0) {
-        const last = pots[pots.length - 1];
-        // merge adjacent layers with an identical eligible set for tidiness
-        if (last && sameSeats(last.eligibleSeats, eligible)) last.amount += amount;
-        else pots.push({ amount, eligibleSeats: eligible });
+        if (eligible.length === 0) {
+          // Every contributor at this level folded — a folded player over-
+          // contributed beyond every live player (their matching calls landed
+          // at a higher cumulative level). No live claimant, so the chips roll
+          // DOWN into the nearest real pot (or carry to the first one).
+          if (pots.length > 0) pots[pots.length - 1].amount += amount;
+          else carry += amount;
+        } else {
+          const last = pots[pots.length - 1];
+          // merge adjacent layers with an identical eligible set for tidiness
+          if (last && sameSeats(last.eligibleSeats, eligible)) last.amount += amount;
+          else { pots.push({ amount: amount + carry, eligibleSeats: eligible }); carry = 0; }
+        }
       }
       prev = level;
     }
+    if (carry > 0 && pots.length > 0) pots[0].amount += carry;
     return pots;
   }
 
