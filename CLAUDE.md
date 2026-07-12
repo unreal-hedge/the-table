@@ -4,7 +4,7 @@ Private multiplayer poker game. Kabir owns the **client** (UI, lobby, ledger dis
 
 ## Architecture (agreed, don't drift)
 
-- **Engine = `src/engine/`** — plain TypeScript, ZERO UI imports. In phase 1b this folder lifts onto the PartyKit server unchanged. If you're about to import React into the engine, stop.
+- **Engine = `shared/engine/`** — plain TypeScript, ZERO UI imports. In phase 1b this folder lifts onto the PartyKit server unchanged. If you're about to import React into the engine, stop.
 - The UI talks to the engine ONLY through `GameManager` methods and the `GameState` snapshot from `state()`. The future server sends this same `GameState` over the wire (with other players' `holeCards` stripped).
 - Stack: Next.js on Vercel (frontend) → PartyKit (authoritative game server, phase 1b) → Supabase (persistent ledger, phase 1b+). For now the overall ledger lives in localStorage.
 
@@ -13,7 +13,7 @@ Private multiplayer poker game. Kabir owns the **client** (UI, lobby, ledger dis
 - **1a (DONE)**: NLHE cash game, hot-seat on one screen, no server. This repo.
 - **1b**: multiplayer — PartyKit server owns GameManager; per-player views; keyword login; disconnect grace (2 min), re-login from another device (spec 8.2); rathole prevention (3.5).
 - **1c**: Sit & Go mode — 100k fixed stacks, 1k/2k blinds doubling per elimination, winner takes all, host sets ₹ value for the overall ledger (spec 1.2, 3.2, 3.3, 4.1).
-- **1d**: Double Flop Tex + run-it-twice with per-pot opt-out (spec 1.1, 9.3). Custom eval via `pokersolver` (already a dependency). Open rule questions live in PARTH-CONTEXT.md — resolve before building.
+- **1d**: Double Flop Tex (spec 1.1). Custom eval via `pokersolver` (already a dependency). Ruleset is settled in `docs/double-flop-tex-answers.md` — the law for 1D. Run-it-twice is split out to its own later phase (Hold'em all-ins only); it is NOT part of 1D.
 - **2**: 3D scene (react-three-fiber) replacing the 2D table. Reads the exact same GameState.
 
 ## Critical: the poker-ts patch

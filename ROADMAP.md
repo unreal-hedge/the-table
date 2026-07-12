@@ -5,7 +5,7 @@
 The plan, phase by phase. **Every phase has a gate**: engine test passes (`npx tsx test-engine.ts`) + `npm run build` clean + Kabir playtests and says **"gate passed"** before the next phase starts. Never build two phases in one go. Checkboxes get updated as work lands.
 
 Rules that never change (from CLAUDE.md):
-- `src/engine/` stays UI-free — no React/DOM imports, ever.
+- `shared/engine/` stays UI-free — no React/DOM imports, ever.
 - Never touch the poker-ts patch (`patches/poker-ts+1.5.0.patch`) or remove the `postinstall` hook.
 - Run `npx tsx test-engine.ts` before every commit — it must print `ALL INVARIANTS PASS`.
 
@@ -55,13 +55,21 @@ Host chooses Cash or SNG in the lobby (spec 1.2). SNG: 100k fixed stacks, blinds
 
 ---
 
-## PHASE 1D — DOUBLE FLOP TEX + RUN-IT-TWICE  **[BLOCKED]**
+## PHASE 1D — DOUBLE FLOP TEX  *(unblocked — planning)*
 
-Do NOT start until `docs/double-flop-tex-answers.md` exists with Parth's answers to the 7 open questions in PARTH-CONTEXT.md. If asked to start without that file, refuse and say what's missing.
+Blocker resolved: `docs/double-flop-tex-answers.md` now exists with Parth's answers to the 7 open questions and the full ruleset. **That doc is the law for 1D — where it and any other doc disagree, it wins.**
 
-When unblocked: fully custom variant — use `pokersolver` for hand evaluation, build as a separate engine module behind a variant interface, and write a dedicated invariant test (like `test-engine.ts`) before wiring any UI. Same for run-it-twice with per-pot opt-out (spec 9.3).
+Fully custom variant — use `pokersolver` for hand evaluation, build as a separate engine module behind a variant interface, and write a dedicated invariant test (like `test-engine.ts`) before wiring any UI.
+
+**Run-it-twice is NOT part of 1D.** It was never specced for the two-board flip structure and is split out to its own later phase (see below).
 
 **Gate:** new variant test passes 200+ random hands with chip conservation.
+
+---
+
+## PHASE 1F — RUN-IT-TWICE  *(deferred)*
+
+Split out of 1D. Scoped to **normal Hold'em all-ins only** — not Double Flop Tex (whose Tex-flip structure already resolves all-in equity; RIT across two boards was never specced). Per-pot opt-out (spec 9.3). To be fully scoped when the phase starts.
 
 ---
 
