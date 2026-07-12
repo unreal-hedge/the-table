@@ -1,20 +1,27 @@
 // ============================================================
 // DFT showdown — the flip / surrender / board-winner resolver.
-// Pure given a seeded RNG + a decision callback. No poker-ts, no UI.
+// Pure given a seeded RNG. No poker-ts, no UI.
+//
+// Two-phase so the manager can interleave interactivity:
+//   prepareShowdown()  runs the intermediate REPRESENTATION flips (chops ->
+//                      one representative each) and returns the contests plus
+//                      exactly which seats MAY surrender.
+//   finalizeShowdown() applies the collected blind decisions + the final flips.
+// resolveShowdown() chains both for the headless tests.
 //
 // The six places a bug hides (Parth), all enforced here:
 //  1. Board winners are computed PER POT, on that pot's eligible set only.
 //  2. Surrender is UNAVAILABLE in a 3+ representation flip (all must run).
-//  3. Run/surrender are blind + simultaneous — the manager collects them
-//     without leaking; this resolver only reads them via `decisionFor`.
+//  3. Run/surrender are blind + simultaneous — the resolver only READS them;
+//     it never lets one seat's decision or cards inform another's.
 //  4. The final flip is ALWAYS exactly heads-up (2 board representatives).
 //  5. Winning both boards = 100%: no flip, no decision.
 //  6. Guaranteed-50%: the banked 50% is irrevocable; a SINGLE representation
 //     flip decides the other 50%; there is NO subsequent final flip.
 //
-// Unifying surrender rule (derived from "surrender requires owning half the
-// pot"): a participant may surrender iff they already own >= half the pot AND
-// the flip is the final, heads-up (2-player) resolution. Everyone else runs.
+// Unifying surrender rule (from "surrender requires owning half the pot"): a
+// participant may surrender iff they already own >= half the pot AND the flip
+// is the final, heads-up (2-player) resolution. Everyone else runs.
 // ============================================================
 
 import type { Card } from "../types";
@@ -32,11 +39,7 @@ export interface Boards {
   b: Card[]; // Board B: 5 cards
 }
 export type Decision = "run" | "surrender";
-/** Supplies a blind run/surrender decision for a seat that MAY surrender. The
- *  resolver only ever calls this for seats that own >= half the pot at a final
- *  heads-up flip; everyone else is forced to run and is never asked. */
 export type DecisionFor = (potIndex: number, seat: number) => Decision;
-
 export type SeatDelta = Map<number, number>; // seat -> chips won (>= 0)
 
 type Side = { outright: number } | { chop: number[] };
@@ -46,7 +49,15 @@ export type PotPlan =
   | { kind: "final"; potIndex: number; amount: number; sideA: Side; sideB: Side }
   | { kind: "guaranteed"; potIndex: number; amount: number; banker: number; chop: number[] };
 
-// ---------- board winners ----------
+/** A pot after its representation flips are resolved — ready for the blind
+ *  decision phase and the final flip. `decisionSeatsOf` says who may surrender. */
+export type PreparedContest =
+  | { kind: "whole"; potIndex: number; amount: number; winner: number }
+  | { kind: "headsup"; potIndex: number; amount: number; a: number; b: number }
+  | { kind: "gtdHeadsUp"; potIndex: number; amount: number; banker: number; other: number }
+  | { kind: "gtdMulti"; potIndex: number; amount: number; banker: number; chop: number[] };
+
+// ---------- board winners + classification ----------
 
 function boardWinners(
   eligible: number[],
@@ -58,7 +69,6 @@ function boardWinners(
   return winnerIndices(evals).map((i) => eligible[i]);
 }
 
-/** Classify every pot into its resolution branch. Pure. */
 export function planShowdown(
   pots: SidePot[],
   arrangements: Map<number, Arrangement>,
@@ -78,25 +88,16 @@ export function planShowdown(
     const bOut = winB.length === 1;
 
     if (aOut && bOut) {
-      if (winA[0] === winB[0]) {
-        plans.push({ kind: "whole", potIndex, amount: pot.amount, winner: winA[0] }); // #5
-      } else {
-        plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { outright: winA[0] }, sideB: { outright: winB[0] } });
-      }
+      if (winA[0] === winB[0]) plans.push({ kind: "whole", potIndex, amount: pot.amount, winner: winA[0] }); // #5
+      else plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { outright: winA[0] }, sideB: { outright: winB[0] } });
     } else if (aOut && !bOut) {
       const x = winA[0];
-      if (winB.includes(x)) {
-        plans.push({ kind: "guaranteed", potIndex, amount: pot.amount, banker: x, chop: winB }); // #6
-      } else {
-        plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { outright: x }, sideB: { chop: winB } });
-      }
+      if (winB.includes(x)) plans.push({ kind: "guaranteed", potIndex, amount: pot.amount, banker: x, chop: winB }); // #6
+      else plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { outright: x }, sideB: { chop: winB } });
     } else if (!aOut && bOut) {
       const y = winB[0];
-      if (winA.includes(y)) {
-        plans.push({ kind: "guaranteed", potIndex, amount: pot.amount, banker: y, chop: winA });
-      } else {
-        plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { chop: winA }, sideB: { outright: y } });
-      }
+      if (winA.includes(y)) plans.push({ kind: "guaranteed", potIndex, amount: pot.amount, banker: y, chop: winA });
+      else plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { chop: winA }, sideB: { outright: y } });
     } else {
       plans.push({ kind: "final", potIndex, amount: pot.amount, sideA: { chop: winA }, sideB: { chop: winB } });
     }
@@ -111,8 +112,6 @@ export interface FlipResult {
   winners: number[]; // seats; >1 == tie
 }
 
-/** A heads-up or multi-way Tex flip: fresh 52-deck minus participants' tex
- *  cards, a fresh 5-card board, best hand wins. */
 export function flip(
   hands: { seat: number; tex: [Card, Card] }[],
   rng: () => number
@@ -124,10 +123,9 @@ export function flip(
 }
 
 /** Representation flip -> exactly one representative. Re-flips on the (rare)
- *  tie so we never carry 3 players into a final flip; deterministic fallback
- *  after 8 straight ties. */
+ *  tie; deterministic fallback after 8 straight ties. */
 function repFlip(chop: number[], arrangements: Map<number, Arrangement>, rng: () => number): number {
-  const hands = chop.map((seat) => ({ seat, tex: arrangements.get(seat)!.tex }));
+  const hands = chop.map((seat) => texOf(seat, arrangements));
   for (let attempt = 0; attempt < 8; attempt++) {
     const r = flip(hands, rng);
     if (r.winners.length === 1) return r.winners[0];
@@ -135,7 +133,102 @@ function repFlip(chop: number[], arrangements: Map<number, Arrangement>, rng: ()
   return Math.min(...chop);
 }
 
-// ---------- settlement ----------
+function resolveSide(side: Side, arrangements: Map<number, Arrangement>, rng: () => number): number {
+  return "outright" in side ? side.outright : repFlip(side.chop, arrangements, rng);
+}
+
+// ---------- prepare / finalize ----------
+
+export function decisionSeatsOf(c: PreparedContest): number[] {
+  if (c.kind === "headsup") return [c.a, c.b];
+  if (c.kind === "gtdHeadsUp") return [c.banker];
+  return [];
+}
+
+/** Phase 1: resolve every pot's representation flips, so who-may-surrender is
+ *  known. Consumes rng for the rep flips only. */
+export function prepareShowdown(
+  pots: SidePot[],
+  arrangements: Map<number, Arrangement>,
+  boards: Boards,
+  rng: () => number
+): PreparedContest[] {
+  return planShowdown(pots, arrangements, boards).map((plan): PreparedContest => {
+    if (plan.kind === "whole") return { kind: "whole", potIndex: plan.potIndex, amount: plan.amount, winner: plan.winner };
+    if (plan.kind === "guaranteed") {
+      if (plan.chop.length === 2) {
+        const other = plan.chop.find((s) => s !== plan.banker)!;
+        return { kind: "gtdHeadsUp", potIndex: plan.potIndex, amount: plan.amount, banker: plan.banker, other };
+      }
+      return { kind: "gtdMulti", potIndex: plan.potIndex, amount: plan.amount, banker: plan.banker, chop: plan.chop };
+    }
+    const repA = resolveSide(plan.sideA, arrangements, rng);
+    const repB = resolveSide(plan.sideB, arrangements, rng);
+    if (repA === repB) return { kind: "whole", potIndex: plan.potIndex, amount: plan.amount, winner: repA };
+    return { kind: "headsup", potIndex: plan.potIndex, amount: plan.amount, a: repA, b: repB };
+  });
+}
+
+/** Phase 2: apply the blind decisions + final flips. Consumes rng for flips. */
+export function finalizeShowdown(
+  prepared: PreparedContest[],
+  decisions: Map<string, Decision>,
+  arrangements: Map<number, Arrangement>,
+  rng: () => number
+): SeatDelta {
+  const delta: SeatDelta = new Map();
+  const add = (seat: number, amt: number) => {
+    if (amt < 0) throw new Error("negative award");
+    delta.set(seat, (delta.get(seat) ?? 0) + amt);
+  };
+  const dec = (pot: number, seat: number): Decision => decisions.get(`${pot}:${seat}`) ?? "run";
+
+  for (const c of prepared) {
+    if (c.kind === "whole") {
+      add(c.winner, c.amount);
+    } else if (c.kind === "headsup") {
+      const da = dec(c.potIndex, c.a);
+      const db = dec(c.potIndex, c.b);
+      if (da === "surrender" && db === "surrender") splitAmong([c.a, c.b], c.amount, add);
+      else if (da === "run" && db === "surrender") payRunSurrender(c.a, c.b, c.amount, add);
+      else if (da === "surrender" && db === "run") payRunSurrender(c.b, c.a, c.amount, add);
+      else splitAmong(flip([texOf(c.a, arrangements), texOf(c.b, arrangements)], rng).winners, c.amount, add);
+    } else if (c.kind === "gtdHeadsUp") {
+      const banked = Math.floor(c.amount / 2);
+      const contested = c.amount - banked;
+      add(c.banker, banked);
+      if (dec(c.potIndex, c.banker) === "surrender") payRunSurrender(c.other, c.banker, contested, add);
+      else splitAmong(flip([texOf(c.banker, arrangements), texOf(c.other, arrangements)], rng).winners, contested, add);
+    } else {
+      const banked = Math.floor(c.amount / 2);
+      const contested = c.amount - banked;
+      add(c.banker, banked);
+      const hands = c.chop.map((s) => texOf(s, arrangements));
+      let r = flip(hands, rng);
+      for (let a = 0; a < 7 && r.winners.length > 1; a++) r = flip(hands, rng);
+      splitAmong(r.winners, contested, add);
+    }
+  }
+  return delta;
+}
+
+/** Chain both phases; the headless path with an on-demand decision callback. */
+export function resolveShowdown(
+  pots: SidePot[],
+  arrangements: Map<number, Arrangement>,
+  boards: Boards,
+  decisionFor: DecisionFor,
+  rng: () => number
+): SeatDelta {
+  const prepared = prepareShowdown(pots, arrangements, boards, rng);
+  const decisions = new Map<string, Decision>();
+  for (const c of prepared) {
+    for (const seat of decisionSeatsOf(c)) decisions.set(`${c.potIndex}:${seat}`, decisionFor(c.potIndex, seat));
+  }
+  return finalizeShowdown(prepared, decisions, arrangements, rng);
+}
+
+// ---------- helpers ----------
 
 function splitAmong(seats: number[], amount: number, add: (s: number, a: number) => void): void {
   const ordered = [...seats].sort((a, b) => a - b);
@@ -147,107 +240,12 @@ function splitAmong(seats: number[], amount: number, add: (s: number, a: number)
   }
 }
 
-function resolveSide(side: Side, arrangements: Map<number, Arrangement>, rng: () => number): number {
-  return "outright" in side ? side.outright : repFlip(side.chop, arrangements, rng);
-}
-
-/** Final heads-up flip between two half-owners, staking `amount` (100%). Both
- *  may surrender. */
-function settleFinalFlip(
-  potIndex: number,
-  amount: number,
-  x: number,
-  y: number,
-  arrangements: Map<number, Arrangement>,
-  decisionFor: DecisionFor,
-  rng: () => number,
-  add: (s: number, a: number) => void
-): void {
-  const dx = decisionFor(potIndex, x);
-  const dy = decisionFor(potIndex, y);
-  if (dx === "surrender" && dy === "surrender") {
-    splitAmong([x, y], amount, add); // 50/50
-  } else if (dx === "run" && dy === "surrender") {
-    payRunSurrender(x, y, amount, add);
-  } else if (dx === "surrender" && dy === "run") {
-    payRunSurrender(y, x, amount, add);
-  } else {
-    const r = flip([texOf(x, arrangements), texOf(y, arrangements)], rng);
-    splitAmong(r.winners, amount, add); // 1 winner takes all; tie -> 50/50
-  }
-}
-
 function payRunSurrender(runner: number, surrenderer: number, amount: number, add: (s: number, a: number) => void): void {
   const surrShare = Math.floor(amount * 0.3);
   add(surrenderer, surrShare);
-  add(runner, amount - surrShare); // runner gets 70% (+ any rounding chip)
+  add(runner, amount - surrShare); // 70% (+ any rounding chip)
 }
 
 function texOf(seat: number, arrangements: Map<number, Arrangement>): { seat: number; tex: [Card, Card] } {
   return { seat, tex: arrangements.get(seat)!.tex };
-}
-
-function settlePot(
-  plan: PotPlan,
-  arrangements: Map<number, Arrangement>,
-  decisionFor: DecisionFor,
-  rng: () => number,
-  add: (s: number, a: number) => void
-): void {
-  if (plan.kind === "whole") {
-    add(plan.winner, plan.amount);
-    return;
-  }
-  if (plan.kind === "final") {
-    const repA = resolveSide(plan.sideA, arrangements, rng);
-    const repB = resolveSide(plan.sideB, arrangements, rng);
-    if (repA === repB) {
-      add(repA, plan.amount); // one player represented both boards -> whole pot
-      return;
-    }
-    settleFinalFlip(plan.potIndex, plan.amount, repA, repB, arrangements, decisionFor, rng, add);
-    return;
-  }
-  // guaranteed-50%: banker keeps half no matter what; the other half is the
-  // single representation flip among `chop` (which includes the banker).
-  const banked = Math.floor(plan.amount / 2);
-  const contested = plan.amount - banked;
-  add(plan.banker, banked);
-  if (plan.chop.length === 2) {
-    // heads-up: banker owns a half -> may surrender; challenger must run.
-    const other = plan.chop.find((s) => s !== plan.banker)!;
-    const d = decisionFor(plan.potIndex, plan.banker);
-    if (d === "surrender") {
-      // banker surrenders on the contested half only: banker 30%, runner 70%.
-      payRunSurrender(other, plan.banker, contested, add);
-    } else {
-      const r = flip([texOf(plan.banker, arrangements), texOf(other, arrangements)], rng);
-      splitAmong(r.winners, contested, add);
-    }
-  } else {
-    // 3+ representation flip: no surrender, everyone runs.
-    const hands = plan.chop.map((s) => texOf(s, arrangements));
-    let r = flip(hands, rng);
-    for (let attempt = 0; attempt < 7 && r.winners.length > 1; attempt++) r = flip(hands, rng);
-    splitAmong(r.winners, contested, add);
-  }
-}
-
-/** Full showdown: plan every pot, then settle each. Returns per-seat chip
- *  deltas (all >= 0) whose total equals the total in all pots. */
-export function resolveShowdown(
-  pots: SidePot[],
-  arrangements: Map<number, Arrangement>,
-  boards: Boards,
-  decisionFor: DecisionFor,
-  rng: () => number
-): SeatDelta {
-  const delta: SeatDelta = new Map();
-  const add = (seat: number, amt: number) => {
-    if (amt < 0) throw new Error("negative award");
-    delta.set(seat, (delta.get(seat) ?? 0) + amt);
-  };
-  const plans = planShowdown(pots, arrangements, boards);
-  for (const plan of plans) settlePot(plan, arrangements, decisionFor, rng, add);
-  return delta;
 }
