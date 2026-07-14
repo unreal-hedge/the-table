@@ -6,6 +6,58 @@ disagree, this doc wins.
 
 ---
 
+## RULINGS — amendments (Kabir, final)
+
+These close the two previously-open DFT questions. **Final; do not revisit
+without an explicit new ruling.**
+
+### R1 — Surrender eligibility (was HANDOFF §E2). RULED: keep banker-only.
+
+A participant may **SURRENDER only if they already own a guaranteed share of
+the pot** — i.e. they are the banker in the guaranteed-50% branch, at the final
+heads-up resolution. A challenger who owns nothing yet **must RUN** the flip.
+The floated "challenger buys out at 40%" idea is **rejected** (it contradicts
+the own-half-to-surrender rule and the 30/70 symmetry). No code change — this
+is exactly what the engine already does.
+
+### R2 — Flip ties (was HANDOFF §E1). RULED: even split, immediately, no re-runs.
+
+**Any flip that ties splits the contested amount evenly among that flip's tied
+winners, immediately. No re-runs. No lowest-seat fallback. Seat position never
+decides who wins chips.** This applies to **every** flip type:
+
+- **Final heads-up flip ties** → the contested stake splits 50/50.
+- **Guaranteed-50% representation flip (`gtdMulti`) ties** → the contested half
+  splits evenly among the tied winners; the banked half is untouched.
+- **Board-representation flip ties** → **no champion is crowned**, so that board
+  sends no representative to a final flip. Instead the pot resolves by
+  **board ownership**: each board's 50% is split evenly among *that board's*
+  tied representatives (a chopped board's tied flip-winners, or its lone
+  outright winner). A final heads-up flip happens **only** when both boards each
+  reduced to exactly one representative. (Engine: the `boardSplit` outcome in
+  `showdown.ts`.)
+
+  *Rationale:* this is expected-value-preserving. A tied board rep who would
+  have had a ~50% shot at a 100% final flip instead banks their equal share of
+  that board's 50% — the same expected value, with zero randomness or seat bias.
+
+  *Noted edge (not a seat-decides-chips violation):* when an even split leaves
+  an **indivisible odd chip** (e.g. 500 split 3 ways), that single leftover chip
+  follows the universal poker convention — awarded to the lowest seat number.
+  This is the same `splitAmong` rounding used by every split in the engine
+  (including the 30/70 surrender payout); it concerns sub-chip rounding only,
+  never who *wins* a flip. Flagged for the record; change only if Kabir rules
+  otherwise.
+
+### Also reconfirmed (both sides agreed)
+
+- **Run-it-twice stays CUT from 1D.** It becomes its own later phase, scoped to
+  **normal Hold'em all-ins only** — never the DFT two-board flip structure.
+- **DFT is 7-max by card arithmetic** (7×6 hole + two 5-card boards = 52).
+  8 players is physically impossible and is rejected at the config layer.
+
+---
+
 ## THE GAME
 
 Double Flop Tex is a six-card bomb-pot variant played on **two boards** with
@@ -118,6 +170,11 @@ board with a weak hand still wins that half if their Tex flip wins.
 first, *then* the two representatives flip against each other for the whole
 pot. Flips are always **sequential** in this order.
 
+**If a representation flip itself ties** (see R2): no representative is crowned
+for that board. The final heads-up flip runs only when *both* boards produced
+exactly one representative; otherwise the pot resolves by board ownership —
+each board's 50% split evenly among that board's tied reps.
+
 **Special case — win one board outright AND tie on the other.** A player who
 **outright wins one board AND is part of the chop on the other board** banks
 **50% of the pot immediately and irrevocably**. That half is **never at risk
@@ -144,7 +201,8 @@ A heads-up Texas Hold'em runout using only the players' Tex hands.
 - **Fresh 52-card deck**, minus the cards held by the flip participants
   (4 removed for 2 players, 6 for 3, etc.)
 - Fresh **5-card community board** dealt.
-- Winner takes the contested amount.
+- Winner takes the contested amount. **If the flip ties, the contested amount
+  is split evenly among the tied winners — no re-run** (see R2).
 
 **The final flip is always heads-up between exactly two board
 representatives.** Three or more players only ever appear in a *representation*

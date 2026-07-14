@@ -8,7 +8,8 @@ import { strToCard } from "./shared/engine/dft/cards";
 import type { Card } from "./shared/engine/types";
 import type { SidePot } from "./shared/engine/dft/betting";
 import {
-  planShowdown, resolveShowdown, type Arrangement, type Boards, type DecisionFor,
+  planShowdown, prepareShowdown, resolveShowdown,
+  type Arrangement, type Boards, type DecisionFor,
 } from "./shared/engine/dft/showdown";
 
 let failures = 0;
@@ -150,6 +151,75 @@ function guaranteed(eligible: number[]): { arrangements: Map<number, Arrangement
     if (!winners.every((w) => w === 0 || w === 1)) headsUpOk = false;
   }
   check("#4 final flip is heads-up and pot-conserving", headsUpOk);
+}
+
+// ---------- #7: TIE RESOLUTION (Kabir's ruling) — even split, no re-run, no seat fallback ----------
+{
+  // 7a. FINAL heads-up flip that ties -> exact 50/50 of the stake. Two outright
+  // board winners both RUN; whenever the final flip ties, the pot splits evenly.
+  // (A win-take-all-on-tie or seat bias would fail the exact-500/500 assert.)
+  const arrangements = new Map<number, Arrangement>([
+    [0, arr(["Ah", "9h"], ["3h", "4h"], ["4c", "6d"])], // wins board A outright; junk tex
+    [1, arr(["3c", "4d"], ["As", "9s"], ["5c", "7d"])], // wins board B outright; junk tex
+  ]);
+  const boards: Boards = { a: board(["Kh", "Qh", "Jh", "Th", "2c"]), b: board(["Ks", "Qs", "Js", "Ts", "2d"]) };
+  const pots: SidePot[] = [{ amount: 1000, eligibleSeats: [0, 1] }];
+  let ties = 0, evenSplitOk = true, conserved = true;
+  for (let s = 1; s <= 2500; s++) {
+    const d = resolveShowdown(pots, arrangements, boards, RUN, makeRng(s));
+    if (sum(d) !== 1000) conserved = false;
+    const a = d.get(0) ?? 0, b = d.get(1) ?? 0;
+    if (a > 0 && b > 0) { ties++; if (!(a === 500 && b === 500)) evenSplitOk = false; } // both paid == flip tied
+  }
+  check("#7a final-flip tie splits stake exactly 50/50 (no seat bias)", ties > 0 && evenSplitOk, `${ties} ties`);
+  check("#7a stake always fully distributed", conserved);
+}
+{
+  // 7b. gtdMulti (3-way representation flip for the contested 50%): a tie splits
+  // the contested half among the tied winners in ONE flip. Banker always keeps
+  // the banked 50% (a re-run collapsing the tie must never cost the banker).
+  const g = guaranteed([0, 1, 2]); // banker 0, chop [0,1,2], banked 500 / contested 500
+  let multiWinTies = 0, bankerAlwaysBanks = true, conserved = true;
+  for (let s = 1; s <= 1500; s++) {
+    const d = resolveShowdown(g.pots, g.arrangements, g.boards, RUN, makeRng(s));
+    if (sum(d) !== 1000) conserved = false;
+    if ((d.get(0) ?? 0) < 500) bankerAlwaysBanks = false; // banker below banked half
+    // seats sharing the contested half: banker>500 means banker also took a slice
+    const sharers = [0, 1, 2].filter((k) => (d.get(k) ?? 0) > (k === 0 ? 500 : 0));
+    if (sharers.length > 1) multiWinTies++;
+  }
+  check("#7b gtdMulti tie splits contested among >1 tied winner (no re-run to one)", multiWinTies > 0, `${multiWinTies} tie splits`);
+  check("#7b banker keeps banked 50% through every tie", bankerAlwaysBanks);
+  check("#7b pot always fully distributed", conserved);
+}
+{
+  // 7c. REPRESENTATION flip tie -> boardSplit. Board A is chopped by {0,1};
+  // board B is won outright by seat 2. When {0,1}'s representation flip ties,
+  // NO champion is crowned and NO final flip runs: board A's half (500) splits
+  // 250/250 between {0,1}, board B's half (500) goes to seat 2 -> 250/250/500.
+  // The OLD min-seat fallback would instead crown seat 0 and send it to a final
+  // flip for 100% (outcomes 1000/0 or 0/1000) — impossible under this assert.
+  const arrangements = new Map<number, Arrangement>([
+    [0, arr(["Ah", "Ac"], ["7d", "9h"], ["6c", "4c"])], // ties seat1 on board A (KK+AA); junk tex
+    [1, arr(["As", "Ad"], ["7h", "9d"], ["6d", "4h"])], // ties seat0 on board A; junk tex
+    [2, arr(["Tc", "Jd"], ["Ks", "Kc"], ["2c", "3c"])], // loses A, wins B outright (KK+QQ)
+  ]);
+  const boards: Boards = { a: board(["Kh", "Kd", "7c", "2s", "3d"]), b: board(["Qs", "Qh", "8c", "4d", "5s"]) };
+  const pots: SidePot[] = [{ amount: 1000, eligibleSeats: [0, 1, 2] }];
+  check("#7c setup is board-A-chop vs board-B-outright", planShowdown(pots, arrangements, boards)[0].kind === "final");
+  let boardSplits = 0, exactSplitOk = true, collapsed = false, conserved = true;
+  for (let s = 1; s <= 2500; s++) {
+    const prep = prepareShowdown(pots, arrangements, boards, makeRng(s))[0];
+    if (prep.kind !== "boardSplit") continue; // rep flip had a clean winner -> normal headsup
+    boardSplits++;
+    const d = resolveShowdown(pots, arrangements, boards, RUN, makeRng(s));
+    if (sum(d) !== 1000) conserved = false;
+    if (!((d.get(0) ?? 0) === 250 && (d.get(1) ?? 0) === 250 && (d.get(2) ?? 0) === 500)) exactSplitOk = false;
+    if ((d.get(0) ?? 0) === 1000 || (d.get(1) ?? 0) === 1000) collapsed = true; // a fallback-to-one champion
+  }
+  check("#7c representation-flip tie -> boardSplit 250/250/500 (both choppers paid)", boardSplits > 0 && exactSplitOk, `${boardSplits} boardSplits`);
+  check("#7c no seat-fallback: a tie never collapses to one champion", !collapsed);
+  check("#7c pot always fully distributed", conserved);
 }
 
 // ---------- conservation fuzz on real deals ----------

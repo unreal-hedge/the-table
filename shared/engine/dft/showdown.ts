@@ -9,7 +9,7 @@
 //   finalizeShowdown() applies the collected blind decisions + the final flips.
 // resolveShowdown() chains both for the headless tests.
 //
-// The six places a bug hides (Parth), all enforced here:
+// The seven places a bug hides (Parth + Kabir's rulings), all enforced here:
 //  1. Board winners are computed PER POT, on that pot's eligible set only.
 //  2. Surrender is UNAVAILABLE in a 3+ representation flip (all must run).
 //  3. Run/surrender are blind + simultaneous — the resolver only READS them;
@@ -18,10 +18,17 @@
 //  5. Winning both boards = 100%: no flip, no decision.
 //  6. Guaranteed-50%: the banked 50% is irrevocable; a SINGLE representation
 //     flip decides the other 50%; there is NO subsequent final flip.
+//  7. TIE RESOLUTION (Kabir's ruling, final): any flip that ties splits the
+//     contested amount evenly among that flip's tied winners, IMMEDIATELY —
+//     no re-runs, and seat position NEVER decides chips. This holds for every
+//     flip type. A final/gtd flip that ties just splits its stake. A
+//     representation flip that ties crowns no single champion, so that board
+//     produces no representative for a final flip; instead each board's 50%
+//     is split among that board's tied reps (a `boardSplit` — see below).
 //
-// Unifying surrender rule (from "surrender requires owning half the pot"): a
-// participant may surrender iff they already own >= half the pot AND the flip
-// is the final, heads-up (2-player) resolution. Everyone else runs.
+// Surrender eligibility (E2, Kabir's ruling, final): a participant may
+// surrender iff they already own >= half the pot AND the flip is the final,
+// heads-up (2-player) resolution. A challenger who owns nothing must run.
 // ============================================================
 
 import type { Card } from "../types";
@@ -55,7 +62,12 @@ export type PreparedContest =
   | { kind: "whole"; potIndex: number; amount: number; winner: number }
   | { kind: "headsup"; potIndex: number; amount: number; a: number; b: number }
   | { kind: "gtdHeadsUp"; potIndex: number; amount: number; banker: number; other: number }
-  | { kind: "gtdMulti"; potIndex: number; amount: number; banker: number; chop: number[] };
+  | { kind: "gtdMulti"; potIndex: number; amount: number; banker: number; chop: number[] }
+  // A representation flip tied, so neither/one board crowned a single rep.
+  // No final flip, no run/surrender: each board's half is split among its
+  // tied reps (repsA/repsB — length 1 for an outright/clean-flip side,
+  // length >1 for a tied representation flip). (Ruling #7)
+  | { kind: "boardSplit"; potIndex: number; amount: number; repsA: number[]; repsB: number[] };
 
 // ---------- board winners + classification ----------
 
@@ -122,19 +134,17 @@ export function flip(
   return { board, winners: winnerIndices(evals).map((i) => hands[i].seat) };
 }
 
-/** Representation flip -> exactly one representative. Re-flips on the (rare)
- *  tie; deterministic fallback after 8 straight ties. */
-function repFlip(chop: number[], arrangements: Map<number, Arrangement>, rng: () => number): number {
-  const hands = chop.map((seat) => texOf(seat, arrangements));
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const r = flip(hands, rng);
-    if (r.winners.length === 1) return r.winners[0];
-  }
-  return Math.min(...chop);
+/** Representation flip -> the tied winner set (length 1 = a clean champion,
+ *  length >1 = a tie). ONE flip only: no re-runs, no seat-based fallback —
+ *  a tie is resolved downstream by splitting the board's half (ruling #7). */
+function repFlipWinners(chop: number[], arrangements: Map<number, Arrangement>, rng: () => number): number[] {
+  return flip(chop.map((seat) => texOf(seat, arrangements)), rng).winners;
 }
 
-function resolveSide(side: Side, arrangements: Map<number, Arrangement>, rng: () => number): number {
-  return "outright" in side ? side.outright : repFlip(side.chop, arrangements, rng);
+/** The seat(s) representing one board: the outright winner, or the tied
+ *  winners of that board's representation flip. */
+function resolveSide(side: Side, arrangements: Map<number, Arrangement>, rng: () => number): number[] {
+  return "outright" in side ? [side.outright] : repFlipWinners(side.chop, arrangements, rng);
 }
 
 // ---------- prepare / finalize ----------
@@ -162,10 +172,17 @@ export function prepareShowdown(
       }
       return { kind: "gtdMulti", potIndex: plan.potIndex, amount: plan.amount, banker: plan.banker, chop: plan.chop };
     }
-    const repA = resolveSide(plan.sideA, arrangements, rng);
-    const repB = resolveSide(plan.sideB, arrangements, rng);
-    if (repA === repB) return { kind: "whole", potIndex: plan.potIndex, amount: plan.amount, winner: repA };
-    return { kind: "headsup", potIndex: plan.potIndex, amount: plan.amount, a: repA, b: repB };
+    const repsA = resolveSide(plan.sideA, arrangements, rng);
+    const repsB = resolveSide(plan.sideB, arrangements, rng);
+    // Only a clean single-rep-per-board result yields the heads-up final flip.
+    // If either representation flip tied, no champion is crowned for that board
+    // (ruling #7) — each board's half is split among its tied reps instead.
+    if (repsA.length === 1 && repsB.length === 1) {
+      const a = repsA[0], b = repsB[0];
+      if (a === b) return { kind: "whole", potIndex: plan.potIndex, amount: plan.amount, winner: a };
+      return { kind: "headsup", potIndex: plan.potIndex, amount: plan.amount, a, b };
+    }
+    return { kind: "boardSplit", potIndex: plan.potIndex, amount: plan.amount, repsA, repsB };
   });
 }
 
@@ -199,14 +216,21 @@ export function finalizeShowdown(
       add(c.banker, banked);
       if (dec(c.potIndex, c.banker) === "surrender") payRunSurrender(c.other, c.banker, contested, add);
       else splitAmong(flip([texOf(c.banker, arrangements), texOf(c.other, arrangements)], rng).winners, contested, add);
-    } else {
+    } else if (c.kind === "gtdMulti") {
       const banked = Math.floor(c.amount / 2);
       const contested = c.amount - banked;
       add(c.banker, banked);
-      const hands = c.chop.map((s) => texOf(s, arrangements));
-      let r = flip(hands, rng);
-      for (let a = 0; a < 7 && r.winners.length > 1; a++) r = flip(hands, rng);
-      splitAmong(r.winners, contested, add);
+      // ONE flip; a tie splits the contested half among the tied winners (#7).
+      const winners = flip(c.chop.map((s) => texOf(s, arrangements)), rng).winners;
+      splitAmong(winners, contested, add);
+    } else {
+      // boardSplit: a representation flip tied, so no final flip happens.
+      // Each board's half goes to that board's tied reps (ruling #7). A seat
+      // that shares both boards' reps is paid from both halves.
+      const halfA = Math.floor(c.amount / 2);
+      const halfB = c.amount - halfA;
+      splitAmong(c.repsA, halfA, add);
+      splitAmong(c.repsB, halfB, add);
     }
   }
   return delta;
