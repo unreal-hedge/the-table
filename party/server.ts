@@ -23,12 +23,18 @@
 
 import { routePartykitRequest, Server, type Connection } from "partyserver";
 import { GameManager, fmt } from "../shared/engine/manager";
-import type { GameState } from "../shared/engine/types";
+import { DoubleFlopManager, MAX_DFT_SEATS } from "../shared/engine/dft/manager";
+import type { GameConfig, GameState, PlayerRecord, Variant } from "../shared/engine/types";
 import { filterStateFor } from "./filter";
 import {
-  ClientMessage, ServerMessage, HostCommand, ChatEntry, PresenceMember,
+  ClientMessage, ServerMessage, HostCommand, ChatEntry, PresenceMember, StartingPlayer,
   CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH, INVALID_LOGIN,
 } from "../shared/protocol";
+
+/** The active engine — either variant. Both expose the session surface the
+ *  server drives (state/act/dealNextHand/stop/ledger/toggleSitOut/
+ *  approveAddChips/exportPlayers); variant-specific calls narrow by instanceof. */
+type Engine = GameManager | DoubleFlopManager;
 
 /** Cloudflare bindings available to the worker. The Durable Object
  *  namespace name here MUST match the binding in party/wrangler.jsonc. */
@@ -53,7 +59,22 @@ export class TableServer extends Server<Env> {
   // which is acceptable until persistence lands (post-1b).
   static options = { hibernate: false };
 
-  private gm: GameManager | null = null;
+  private gm: Engine | null = null;
+  /** Current game mode + a queued switch that applies at the next deal
+   *  (never mid-hand, spec 7.4). */
+  private variant: Variant = "nlhe";
+  private pendingVariant: Variant | null = null;
+  /** Server-side pause for DFT (NLHE pauses inside its own engine; DFT's
+   *  simultaneous phases make an in-engine pause awkward, so the server
+   *  owns it — freezes timers + presents phase "paused"). */
+  private dftPaused = false;
+  /** Seed source for the DFT engine (real time + counter, never Math.random). */
+  private seedCounter = 0;
+  /** The running session's config, kept for the mid-session engine handoff. */
+  private config: GameConfig | null = null;
+  /** Server-injected dealer-log lines (mode-switch announcements) merged into
+   *  the outgoing GameState.log — variant-agnostic, unlike the engine logs. */
+  private systemLog: string[] = [];
   /** connection.id → playerId. THE identity map — every permission
    *  check goes through this, never through fields in the message. */
   private joined = new Map<string, string>();
@@ -190,7 +211,7 @@ export class TableServer extends Server<Env> {
     if (this.gm) {
       this.send(conn, {
         type: "state",
-        state: filterStateFor(this.gm.state(), this.seatOf(id)),
+        state: filterStateFor(this.presentState(this.gm.state()), this.seatOf(id)),
         at: Date.now(),
       });
       this.send(conn, { type: "ledger", rows: this.gm.ledger() });
@@ -206,6 +227,7 @@ export class TableServer extends Server<Env> {
     conn: Connection, playerId: string, action: string, amount?: number
   ) {
     if (!this.gm) return this.error(conn, "No game running");
+    if (this.isPaused()) return this.error(conn, "Game is paused");
     const st = this.gm.state();
     const seat = this.seatOf(playerId);
 
@@ -236,24 +258,24 @@ export class TableServer extends Server<Env> {
   }
 
   private handleTimeBank(conn: Connection, playerId: string) {
-    if (!this.gm) return this.error(conn, "No game running");
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (!(g instanceof GameManager)) return this.error(conn, "No time bank in this mode");
     const seat = this.seatOf(playerId);
     // same rule as act: only the player on the clock can extend it
-    if (seat == null || this.gm.state().playerToAct !== seat) {
-      return this.error(conn, "Not your turn");
-    }
-    if (!this.gm.useTimeBank()) return this.error(conn, "No time bank left");
+    if (seat == null || g.state().playerToAct !== seat) return this.error(conn, "Not your turn");
+    if (!g.useTimeBank()) return this.error(conn, "No time bank left");
     this.afterMutation(); // broadcasts the new deadline + re-arms the clock
   }
 
   private handleShow(conn: Connection, playerId: string) {
-    if (!this.gm) return this.error(conn, "No game running");
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (!(g instanceof GameManager)) return this.error(conn, "Not available in this mode");
     const seat = this.seatOf(playerId);
     // Same rule as act: only the seat the ENGINE says may show, may show.
-    if (seat == null || this.gm.state().canShowSeat !== seat) {
-      return this.error(conn, "You can't show right now");
-    }
-    this.gm.voluntaryShow(seat);
+    if (seat == null || g.state().canShowSeat !== seat) return this.error(conn, "You can't show right now");
+    g.voluntaryShow(seat);
     this.afterMutation();
   }
 
@@ -328,8 +350,17 @@ export class TableServer extends Server<Env> {
           if (c) c.host = true;
         }
         this.disconnectGraceMs = cmd.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS;
+        const mode: Variant = cmd.gameMode ?? "nlhe";
+        if (mode === "dft" && cmd.players.length > MAX_DFT_SEATS) {
+          return this.error(conn, `Double Flop Tex seats ${MAX_DFT_SEATS} max — remove a player`);
+        }
         try {
-          this.gm = new GameManager(cmd.config, cmd.players);
+          this.variant = mode;
+          this.pendingVariant = null;
+          this.dftPaused = false;
+          this.config = cmd.config;
+          this.systemLog = [];
+          this.gm = this.makeEngine(mode, cmd.config, cmd.players);
           this.gm.start();
         } catch (e) {
           console.error(`[TableServer] start failed:`, e);
@@ -347,15 +378,33 @@ export class TableServer extends Server<Env> {
         }
         break;
       }
-      case "pause":    this.gm?.togglePause(); break;
+      case "pause":
+        if (this.gm instanceof GameManager) this.gm.togglePause(); // NLHE: in-engine
+        else if (this.gm) this.dftPaused = !this.dftPaused;        // DFT: server-side
+        break;
+      case "setGameMode": {
+        if (!this.gm) return this.error(conn, "No game running");
+        const target = cmd.mode;
+        if (target === this.variant && !this.pendingVariant) {
+          return this.error(conn, `Already playing ${modeLabel(target)}`);
+        }
+        // 7-max guard for a switch TO dft — refuse loudly, never auto-sit anyone
+        if (target === "dft") {
+          const dealtIn = this.gm.state().seats.filter((s) => !s.sittingOut).length;
+          if (dealtIn > MAX_DFT_SEATS) {
+            return this.error(conn, `Double Flop Tex seats ${MAX_DFT_SEATS} max — sit someone out first`);
+          }
+        }
+        this.pendingVariant = target; // applies at the next deal (7.4)
+        this.announce(`Next hand: ${modeLabel(target)}`);
+        break;
+      }
       case "dealNext": {
-        // engine's dealNextHand() trusts its caller on timing — dealing
-        // MID-hand would rebuild the table and destroy the live pot.
-        // The hot-seat UI can't misfire this; a remote client could.
+        // dealing MID-hand would destroy the live pot; only between hands.
         if (this.gm?.state().phase !== "handEnded") {
           return this.error(conn, "Can't deal now");
         }
-        this.gm.dealNextHand();
+        this.dealHand();
         break;
       }
       case "addChips": this.gm?.approveAddChips(cmd.playerId, cmd.amount); break;
@@ -391,7 +440,7 @@ export class TableServer extends Server<Env> {
       this.dealTimer = setTimeout(() => {
         this.dealTimer = null;
         if (!this.gm || this.gm.state().phase !== "handEnded") return;
-        this.gm.dealNextHand();
+        this.dealHand(); // applies a queued mode switch (7.4), else deals next
         if (this.gm.state().phase === "handEnded") {
           // Still handEnded = fewer than 2 eligible players. Don't loop —
           // the host deals manually via "dealNext" once rebuys/sit-ins land.
@@ -403,33 +452,106 @@ export class TableServer extends Server<Env> {
       }, HAND_END_PAUSE_MS);
     }
 
-    // Server-owned action clock (Step 6). One timer for the one player on
-    // the clock; pause/resume and hand changes all pass through here, so
-    // clearing + re-arming per mutation is always correct.
+    // Server-owned clocks (Step 6): the per-turn betting clock AND DFT's
+    // shared picking/decisions window both surface as turnDeadlineAt. On
+    // expiry fireTimeout() dispatches the right engine timeout by variant +
+    // sub-phase. DFT's server-side pause freezes the clock entirely.
     if (this.clockTimer) { clearTimeout(this.clockTimer); this.clockTimer = null; }
-    if (base.phase === "inHand" && base.turnDeadlineAt != null) {
+    const paused = this.variant === "dft" && this.dftPaused;
+    if (base.phase === "inHand" && base.turnDeadlineAt != null && !paused) {
       const wait = Math.max(0, base.turnDeadlineAt - Date.now()) + CLOCK_GRACE_MS;
       this.clockTimer = setTimeout(() => {
         this.clockTimer = null;
         if (!this.gm) return;
         const s = this.gm.state();
         if (s.phase !== "inHand" || s.turnDeadlineAt == null) return;
-        // deadline moved (time bank landed as we fired)? the mutation that
-        // moved it already re-armed a fresh timer — stand down
+        // deadline moved (time bank landed as we fired)? stand down
         if (Date.now() < s.turnDeadlineAt) return;
-        this.gm.timeout(); // engine applies auto check/fold + sit-out rules
+        this.fireTimeout(); // NLHE timeout / DFT betting|picking|decisions timeout
         this.afterMutation();
       }, wait);
     }
   }
 
+  // ---------- engine construction, mode switch, timers ----------
+
+  private nextSeed(): number {
+    return Date.now() + this.seedCounter++;
+  }
+
+  private makeEngine(mode: Variant, config: GameConfig, starters: StartingPlayer[], resume?: PlayerRecord[]): Engine {
+    const players = starters.map((p) => ({ id: p.id, name: p.name, buyIn: p.buyIn }));
+    return mode === "dft"
+      ? new DoubleFlopManager(config, players, this.nextSeed(), resume)
+      : new GameManager(config, players, resume);
+  }
+
+  /** Deal the next hand, first applying any queued mode switch (7.4). The
+   *  switch hands the EXACT player records to a fresh engine of the new
+   *  variant, so stacks + ledger are conserved. */
+  private dealHand(): void {
+    if (!this.gm) return;
+    if (this.pendingVariant && this.pendingVariant !== this.variant && this.config) {
+      const target = this.pendingVariant;
+      const records = this.gm.exportPlayers();
+      // re-check 7-max at deal time — players may have joined since the queue
+      if (target === "dft" && records.filter((r) => !r.sittingOut).length > MAX_DFT_SEATS) {
+        this.pendingVariant = null;
+        this.announce(`Mode switch cancelled — Double Flop Tex seats ${MAX_DFT_SEATS} max`);
+        this.gm.dealNextHand();
+        return;
+      }
+      this.variant = target;
+      this.pendingVariant = null;
+      this.dftPaused = false;
+      this.gm = this.makeEngine(target, this.config, [], records);
+      this.gm.start();
+      this.announce(`Now playing: ${modeLabel(target)}`);
+      return;
+    }
+    this.gm.dealNextHand();
+  }
+
+  private fireTimeout(): void {
+    const g = this.gm;
+    if (!g) return;
+    if (g instanceof GameManager) { g.timeout(); return; }
+    // DFT: dispatch by sub-phase (betting per-turn, picking/decisions window)
+    const sub = g.phase();
+    if (sub === "betting") g.bettingTimeout();
+    else if (sub === "picking") g.pickingTimeout();
+    else if (sub === "decisions") g.decisionsTimeout();
+  }
+
+  private isPaused(): boolean {
+    if (this.variant === "dft") return this.dftPaused;
+    return this.gm?.state().phase === "paused";
+  }
+
+  private announce(msg: string): void {
+    this.systemLog.push(msg);
+    if (this.systemLog.length > 15) this.systemLog = this.systemLog.slice(-15);
+  }
+
+  /** Apply server-owned presentation the engines don't know about: DFT's
+   *  server-side pause, and the merged mode-switch announcements. */
+  private presentState(base: GameState): GameState {
+    let s = base;
+    if (this.variant === "dft" && this.dftPaused && s.phase === "inHand") {
+      s = { ...s, phase: "paused", playerToAct: null, legalActions: null };
+    }
+    if (this.systemLog.length) s = { ...s, log: [...s.log, ...this.systemLog] };
+    return s;
+  }
+
   /** One engine snapshot, filtered per receiving connection. */
   private broadcastState(base: GameState) {
     const at = Date.now();
+    const presented = this.presentState(base);
     for (const conn of this.getConnections()) {
       const pid = this.joined.get(conn.id);
       if (pid === undefined) continue; // not joined: receives nothing
-      this.send(conn, { type: "state", state: filterStateFor(base, this.seatOf(pid)), at });
+      this.send(conn, { type: "state", state: filterStateFor(presented, this.seatOf(pid)), at });
     }
   }
 
@@ -478,6 +600,10 @@ export class TableServer extends Server<Env> {
   private error(conn: Connection, msg: string) {
     this.send(conn, { type: "error", msg });
   }
+}
+
+function modeLabel(v: Variant): string {
+  return v === "dft" ? "Double Flop Tex" : "No-Limit Hold'em";
 }
 
 // The Worker entry point: route every request to the right room's

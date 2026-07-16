@@ -8,7 +8,7 @@
 // ============================================================
 
 import type {
-  GameConfig, GameState, LedgerRow, PlayerAction, SessionSummary,
+  GameConfig, GameState, LedgerRow, PlayerAction, SessionSummary, Variant,
 } from "./engine/types";
 
 // ---------- client → server ----------
@@ -29,10 +29,14 @@ export type HostCommand =
       kind: "start";
       config: GameConfig;
       players: StartingPlayer[];
+      gameMode?: Variant; // which engine to start; default "nlhe"
       /** Disconnect grace before auto sit-out (spec 8.2). Defaults to
        *  2 minutes; overridable so tests don't wait that long. */
       disconnectGraceMs?: number;
     }
+  // Host changes the game mode mid-session; ALWAYS applies from the next
+  // hand, never mid-hand (same pattern as blinds, spec 7.4).
+  | { kind: "setGameMode"; mode: Variant }
   | { kind: "pause" }     // toggles pause/resume (spec 7.2)
   | { kind: "dealNext" }  // manual deal when auto-deal is waiting (e.g. after rebuys)
   | { kind: "addChips"; playerId: string; amount: number } // rebuy approval (3.4)
