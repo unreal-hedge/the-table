@@ -12,11 +12,12 @@ interface Props {
   peekable?: boolean;            // hot-seat only; online has no peek flow
   offline?: boolean;             // online: no live connection (grace running)
   bubble?: string | null;        // recent chat line, floats above the seat
+  backCount?: number;            // hidden-card count for opponents (2 NLHE, 6 DFT)
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, onPeek, winBadge }: Props) {
+export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, backCount = 2, onPeek, winBadge }: Props) {
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
@@ -32,7 +33,7 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = 
               show backs, an in-hand player must LOOK in the hand */}
           {v.inHand && (v.holeCards
             ? v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} small />)
-            : [0, 1].map((i) => <CardFace key={i} card={null} small />))}
+            : Array.from({ length: backCount }, (_, i) => <CardFace key={i} card={null} small />))}
         </div>
         <div className="plate">
           {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}

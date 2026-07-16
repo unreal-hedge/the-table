@@ -155,6 +155,20 @@ input { font: inherit; color: var(--text); }
 }
 .board { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%);
   display: flex; gap: 8px; }
+
+/* ============ DOUBLE FLOP — two boards ============ */
+.dft-boards {
+  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; gap: 12px; align-items: center;
+}
+.dft-board { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.dft-board-tag {
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+}
+.dft-cards { display: flex; gap: 6px; min-height: 57px; }
+/* DFT pot sits in the flow between the two boards. Scoped under .dft-boards to
+   outspecify .pot-line's absolute placement (which is defined later in file). */
+.dft-boards .dft-pot { position: static; transform: none; margin: 2px 0; }
 .pot-line {
   position: absolute; left: 50%; top: 66%; transform: translateX(-50%);
   font-family: var(--font-mono), monospace; font-size: 15px; color: var(--gold);
@@ -192,7 +206,7 @@ input { font: inherit; color: var(--text); }
 
 /* ============ SEATS ============ */
 .seat { position: absolute; transform: translate(-50%, -50%); width: 148px; text-align: center; }
-.seat-cards { display: flex; gap: 4px; justify-content: center; margin-bottom: 5px; min-height: 57px; }
+.seat-cards { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 5px; min-height: 57px; }
 .plate {
   position: relative; background: var(--plate); border: 1px solid var(--line);
   border-radius: 11px; padding: 7px 10px 8px; backdrop-filter: blur(4px);

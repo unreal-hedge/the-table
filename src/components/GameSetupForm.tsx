@@ -4,7 +4,9 @@
 // GameConfig and starting players, hands them to onSubmit.
 
 import { useState } from "react";
-import { DEFAULT_CONFIG, GameConfig } from "@/engine/types";
+import { DEFAULT_CONFIG, GameConfig, Variant } from "@/engine/types";
+
+const DFT_MAX_SEATS = 7; // 7×6 hole + two 5-card boards = 52 exactly
 
 export interface SetupPlayer {
   id: string;
@@ -24,13 +26,14 @@ interface Props {
    *  host can't start a game that doesn't include their own identity
    *  (which would make them a silent spectator of their own table). */
   hostLogin?: { id: string; keyword: string };
-  onSubmit: (config: GameConfig, players: SetupPlayer[]) => void;
+  onSubmit: (config: GameConfig, players: SetupPlayer[], gameMode: Variant) => void;
 }
 
 const MIN_KEYWORD_LENGTH = 2;
 
 export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Props) {
   const [cfg, setCfg] = useState<GameConfig>(DEFAULT_CONFIG);
+  const [gameMode, setGameMode] = useState<Variant>("nlhe"); // online host picks the variant
   const [players, setPlayers] = useState<SetupPlayer[]>(
     hostLogin
       ? [
@@ -46,6 +49,8 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
   const num = (v: string) => Math.max(0, Number(v) || 0);
   const loginId = (name: string) => name.trim().toLowerCase();
   const online = idMode === "name";
+  const seatCap = gameMode === "dft" ? DFT_MAX_SEATS : 8;
+  const overSeatCap = players.length > seatCap;
 
   const names = players.map((p) => loginId(p.name));
   const hasDupes = online && new Set(names).size !== names.length;
@@ -54,6 +59,7 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
     players.every((p) => (p.keyword ?? "").trim().length >= MIN_KEYWORD_LENGTH);
   const valid =
     players.length >= 2 &&
+    !overSeatCap &&
     players.every((p) => p.name.trim() && p.buyIn >= cfg.minBuyIn && p.buyIn <= cfg.maxBuyIn) &&
     !hasDupes &&
     keywordsOk;
@@ -69,11 +75,34 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
           keyword: (p.keyword ?? "").trim().toLowerCase(),
         }))
       : players;
-    onSubmit(cfg, finalPlayers);
+    onSubmit(cfg, finalPlayers, online ? gameMode : "nlhe");
   };
 
   return (
     <>
+      {online && (
+        <>
+          <h2>Game mode</h2>
+          <div className="mode-tabs" role="tablist">
+            <button role="tab" aria-selected={gameMode === "nlhe"}
+              className={`mode-tab${gameMode === "nlhe" ? " active" : ""}`}
+              onClick={() => setGameMode("nlhe")}>
+              No-Limit Hold&apos;em
+            </button>
+            <button role="tab" aria-selected={gameMode === "dft"}
+              className={`mode-tab${gameMode === "dft" ? " active" : ""}`}
+              onClick={() => setGameMode("dft")}>
+              Double Flop Tex
+            </button>
+          </div>
+          {gameMode === "dft" && (
+            <p className="form-hint">
+              Two boards, one pot · everyone antes 1 BB, no blinds · seats {DFT_MAX_SEATS} max.
+            </p>
+          )}
+        </>
+      )}
+
       <h2>Game settings</h2>
       <div className="field-row">
         <div className="field"><label>Small blind</label>
@@ -88,7 +117,7 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
           <input type="number" value={cfg.actionTimeSec} onChange={(e) => setCfg({ ...cfg, actionTimeSec: Math.max(5, num(e.target.value)) })} /></div>
       </div>
 
-      <h2>Players ({players.length}/8)</h2>
+      <h2>Players ({players.length}/{seatCap})</h2>
       {players.map((p, i) => {
         const isLockedHostRow = !!hostLogin && i === 0;
         return (
@@ -118,11 +147,14 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
           </div>
         );
       })}
-      {players.length < 8 && (
+      {players.length < seatCap && (
         <button className="ghost-btn"
           onClick={() => setPlayers([...players, { id: `p${Date.now()}`, name: "", buyIn: cfg.defaultBuyIn, keyword: "", host: false }])}>
           + Add player
         </button>
+      )}
+      {overSeatCap && (
+        <p className="form-hint error">Double Flop Tex seats {DFT_MAX_SEATS} max — remove a player.</p>
       )}
       {hasDupes && (
         <p className="form-hint">Two players can&apos;t share the same name — it&apos;s how they log in.</p>

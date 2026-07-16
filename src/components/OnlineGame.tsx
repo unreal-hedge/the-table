@@ -93,9 +93,9 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
           {isHost ? (
             <GameSetupForm submitLabel="Start the game" idMode="name"
               hostLogin={{ id: myId, keyword }}
-              onSubmit={(config, players) => {
+              onSubmit={(config, players, gameMode) => {
                 setSummaryDismissed(false);
-                r.send.host({ kind: "start", config, players });
+                r.send.host({ kind: "start", config, players, gameMode });
               }} />
           ) : (
             <p className="waiting-note">Waiting for the host to start the game…</p>
@@ -159,6 +159,7 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
       onShow={() => r.send.show()}
       onPause={isHost ? () => r.send.host({ kind: "pause" }) : undefined}
       onEnd={isHost ? () => r.send.host({ kind: "end" }) : undefined}
+      onSetMode={isHost ? (mode) => r.send.host({ kind: "setGameMode", mode }) : undefined}
       onAddChips={isHost ? (id, amt) => r.send.host({ kind: "addChips", playerId: id, amount: amt }) : undefined}
       onSitToggle={isHost ? (id, out) => r.send.host({ kind: "sitOut", playerId: id, out }) : undefined}
     />

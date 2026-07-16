@@ -9,7 +9,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { fmt } from "@/engine/manager";
-import { GameState, LedgerRow, PlayerAction } from "@/engine/types";
+import { GameState, LedgerRow, PlayerAction, Variant } from "@/engine/types";
 import { ChatEntry } from "@shared/protocol";
 import { Seat } from "./Seat";
 import { CardFace } from "./CardFace";
@@ -48,6 +48,7 @@ interface Props {
   onShow: () => void;
   onPause?: () => void;
   onEnd?: () => void;
+  onSetMode?: (mode: Variant) => void; // host: switch NLHE <-> DFT (next hand)
   onAddChips?: (id: string, amount: number) => void;
   onSitToggle?: (id: string, out: boolean) => void;
 }
@@ -55,7 +56,7 @@ interface Props {
 export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
   connectedIds, chat, myId, onChat, corner, overlay,
-  onAct, onTimeBank, onShow, onPause, onEnd, onAddChips, onSitToggle,
+  onAct, onTimeBank, onShow, onPause, onEnd, onSetMode, onAddChips, onSitToggle,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
@@ -112,17 +113,42 @@ export function TableView({
           <button onClick={onPause}>{s.phase === "paused" ? "Resume" : "Pause"}</button>
         )}
         <button onClick={() => setShowLedger(true)}>Ledger</button>
+        {isHost && onSetMode && (
+          <button onClick={() => onSetMode(s.variant === "dft" ? "nlhe" : "dft")}>
+            {s.variant === "dft" ? "Switch to Hold'em" : "Switch to Double Flop"}
+          </button>
+        )}
         {isHost && onEnd && <button onClick={onEnd}>End session</button>}
       </div>
 
       <div className="table-wrap">
         <div className="felt" />
-        <div className="table-brand">The Table</div>
+        <div className="table-brand">{s.dft ? "Double Flop" : "The Table"}</div>
         {s.round && <div className="round-tag">{s.round}</div>}
-        <div className="board">
-          {s.communityCards.map((c, i) => <CardFace key={i} card={c} />)}
-        </div>
-        {s.totalPot > 0 && <div className="pot-line">POT {fmt(s.totalPot)}</div>}
+        {s.dft ? (
+          <div className="dft-boards">
+            <div className="dft-board">
+              <span className="dft-board-tag">Board A</span>
+              <div className="dft-cards">
+                {s.dft.boards.a.map((c, i) => <CardFace key={`a${i}`} card={c} small />)}
+              </div>
+            </div>
+            {s.totalPot > 0 && <div className="pot-line dft-pot">POT {fmt(s.totalPot)}</div>}
+            <div className="dft-board">
+              <span className="dft-board-tag">Board B</span>
+              <div className="dft-cards">
+                {s.dft.boards.b.map((c, i) => <CardFace key={`b${i}`} card={c} small />)}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="board">
+              {s.communityCards.map((c, i) => <CardFace key={i} card={c} />)}
+            </div>
+            {s.totalPot > 0 && <div className="pot-line">POT {fmt(s.totalPot)}</div>}
+          </>
+        )}
       </div>
 
       {s.seats.map((v, i) => {
@@ -136,6 +162,7 @@ export function TableView({
             peekable={mode === "hotseat"}
             offline={connectedIds ? !connectedIds.has(v.id) : false}
             bubble={bubbleBySeatId.get(v.id) ?? null}
+            backCount={s.dft ? 6 : 2}
             onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
             winBadge={winBySeat.get(v.seat) ?? null}
           />
@@ -152,6 +179,21 @@ export function TableView({
         onAct={(a, amt) => { onAct(a, amt); setPeekSeat(null); }}
         onTimeBank={onTimeBank}
       />
+
+      {s.dft && (s.dft.subPhase === "picking" || s.dft.subPhase === "decisions") && (
+        <div className="veil">
+          <div>
+            <div className="msg">
+              {s.dft.subPhase === "picking" ? "Choosing hands…" : "Run or surrender…"}
+            </div>
+            <div className="hint">
+              {s.dft.subPhase === "picking"
+                ? "Players are splitting their six cards into three hands. The interactive picker arrives in the next step; for now the default split locks automatically."
+                : "Players are making their blind run/surrender calls."}
+            </div>
+          </div>
+        </div>
+      )}
 
       {s.phase === "paused" && (
         <div className="veil">
