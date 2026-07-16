@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PartySocket } from "partysocket";
-import type { GameState, LedgerRow, PlayerAction, SessionSummary } from "@/engine/types";
+import type { DftDecision, GameState, LedgerRow, PlayerAction, SessionSummary } from "@/engine/types";
 import type {
   ChatEntry, ClientMessage, HostCommand, PresenceMember, ServerMessage,
 } from "@shared/protocol";
@@ -51,6 +51,8 @@ export interface RoomHandle {
     show: () => void;
     chat: (text: string) => void;
     host: (cmd: HostCommand) => void;
+    submitArrangement: (order: number[]) => void;       // DFT picking (6b)
+    declare: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
   };
 }
 
@@ -161,6 +163,8 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
       show: () => post({ type: "show" }),
       chat: (text: string) => post({ type: "chat", text }),
       host: (cmd: HostCommand) => post({ type: "host", cmd }),
+      submitArrangement: (order: number[]) => post({ type: "submitArrangement", order }),
+      declare: (potIndex: number, decision: DftDecision) => post({ type: "declare", potIndex, decision }),
     };
   }, []);
 

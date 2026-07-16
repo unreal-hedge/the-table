@@ -178,6 +178,40 @@ input { font: inherit; color: var(--text); }
 .round-tag { position: absolute; left: 50%; top: 34.5%; transform: translateX(-50%);
   font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
 
+/* ============ DFT PICKING (hand-split screen) ============ */
+/* margin:auto on the flex child centers it AND yields on overflow, so tall
+   content scrolls instead of clipping at the top (unlike align-items:center). */
+.dft-pick {
+  position: absolute; inset: 0; z-index: 16;
+  display: flex; overflow-y: auto; padding: 16px;
+  background: rgba(6, 9, 8, 0.74); backdrop-filter: blur(3px);
+}
+.dft-pick-card {
+  margin: auto; width: 100%; max-width: 360px;
+  background: linear-gradient(180deg, var(--room-2), var(--room));
+  border: 1px solid var(--line); border-radius: 18px;
+  padding: 22px 18px 18px; text-align: center;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.dft-pick-card h3 { font-family: var(--font-display), sans-serif; font-size: 22px; font-weight: 700; }
+.dft-pick-card h3 .tick { color: var(--glow); }
+.dft-pick-card .hint { color: var(--muted); font-size: 13px; margin: 7px 0 18px; line-height: 1.5; }
+.dft-pick-group { margin-bottom: 14px; }
+.dft-pick-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.dft-pick-label {
+  width: 56px; flex-shrink: 0; text-align: right;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold);
+}
+.dft-pick-slot { display: flex; gap: 8px; }
+.dft-pick-cell { border-radius: 7px; line-height: 0; transition: transform 0.15s ease; }
+.dft-pick-cell.selected { outline: 2px solid var(--glow); outline-offset: 2px; transform: translateY(-5px); }
+.dft-pick-board { display: flex; gap: 4px; justify-content: center; margin-top: 6px; opacity: 0.66; }
+.dft-pick-timer { height: 5px; border-radius: 3px; background: rgba(242, 236, 221, 0.1); overflow: hidden; margin: 16px 0; }
+.dft-pick-fill { height: 100%; background: var(--glow); transition: width 0.2s linear; }
+.dft-pick-fill.low { background: var(--danger); }
+.dft-pick .primary-btn { width: 100%; }
+.dft-pick-warn { color: var(--muted); font-size: 11px; margin-top: 11px; }
+
 /* ============ CARDS ============ */
 .card {
   width: 52px; height: 74px; border-radius: 7px; position: relative;

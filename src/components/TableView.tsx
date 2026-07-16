@@ -9,13 +9,14 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { fmt } from "@/engine/manager";
-import { GameState, LedgerRow, PlayerAction, Variant } from "@/engine/types";
+import { DftDecision, GameState, LedgerRow, PlayerAction, Variant } from "@/engine/types";
 import { ChatEntry } from "@shared/protocol";
 import { Seat } from "./Seat";
 import { CardFace } from "./CardFace";
 import { ActionBar } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
+import { DftPicking } from "./DftPicking";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
@@ -49,6 +50,8 @@ interface Props {
   onPause?: () => void;
   onEnd?: () => void;
   onSetMode?: (mode: Variant) => void; // host: switch NLHE <-> DFT (next hand)
+  onSubmitArrangement?: (order: number[]) => void;          // DFT picking (6b)
+  onDeclare?: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
   onAddChips?: (id: string, amount: number) => void;
   onSitToggle?: (id: string, out: boolean) => void;
 }
@@ -56,7 +59,8 @@ interface Props {
 export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
   connectedIds, chat, myId, onChat, corner, overlay,
-  onAct, onTimeBank, onShow, onPause, onEnd, onSetMode, onAddChips, onSitToggle,
+  onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
+  onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
@@ -180,17 +184,34 @@ export function TableView({
         onTimeBank={onTimeBank}
       />
 
-      {s.dft && (s.dft.subPhase === "picking" || s.dft.subPhase === "decisions") && (
+      {s.dft && s.dft.subPhase === "picking" && s.dft.picking && (
+        onSubmitArrangement && mode === "online" ? (
+          <DftPicking
+            key={s.handNumber}
+            holeCards={s.seats.find((x) => x.seat === mySeat)?.holeCards ?? null}
+            boards={s.dft.boards}
+            picking={s.dft.picking}
+            mySeat={mySeat}
+            initialOrder={s.seats.find((x) => x.seat === mySeat)?.arrangement ?? null}
+            deadlineAt={s.turnDeadlineAt}
+            displayNow={displayNow}
+            onSubmit={onSubmitArrangement}
+          />
+        ) : (
+          <div className="veil">
+            <div>
+              <div className="msg">Choosing hands…</div>
+              <div className="hint">Players are splitting their six cards into three hands.</div>
+            </div>
+          </div>
+        )
+      )}
+
+      {s.dft && s.dft.subPhase === "decisions" && (
         <div className="veil">
           <div>
-            <div className="msg">
-              {s.dft.subPhase === "picking" ? "Choosing hands…" : "Run or surrender…"}
-            </div>
-            <div className="hint">
-              {s.dft.subPhase === "picking"
-                ? "Players are splitting their six cards into three hands. The interactive picker arrives in the next step; for now the default split locks automatically."
-                : "Players are making their blind run/surrender calls."}
-            </div>
+            <div className="msg">Run or surrender…</div>
+            <div className="hint">Players are making their blind run/surrender calls.</div>
           </div>
         </div>
       )}
