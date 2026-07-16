@@ -18,6 +18,7 @@ import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
 import { DftPicking } from "./DftPicking";
 import { DftDecisions } from "./DftDecisions";
+import { DftReveal } from "./DftReveal";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
@@ -226,6 +227,15 @@ export function TableView({
             </div>
           </div>
         )
+      )}
+
+      {s.dft && s.phase === "handEnded" && s.dft.flips.length > 0 && (
+        <DftReveal
+          key={s.handNumber}
+          flips={s.dft.flips}
+          result={s.lastHandResult ?? []}
+          nameOf={(seat) => s.seats.find((x) => x.seat === seat)?.name ?? `Seat ${seat + 1}`}
+        />
       )}
 
       {s.phase === "paused" && (

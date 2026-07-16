@@ -44,6 +44,11 @@ export interface Env {
 
 // Matches the hot-seat UI's pause between hands (page.tsx uses 4200ms).
 const HAND_END_PAUSE_MS = 4200;
+// A DFT hand that resolved through flips holds the table longer so the
+// sequential flip reveal (DftReveal) can finish before the next deal.
+const DFT_REVEAL_BASE_MS = 3000;
+const DFT_REVEAL_PER_FLIP_MS = 2400; // matches DftReveal's STEP_MS
+const DFT_REVEAL_MAX_MS = 13_000;
 // Server-side slack past the action deadline before forcing the auto
 // check/fold — covers network latency so a buzzer-beater call isn't
 // unfairly beaten by the server's own clock (Step 6, spec 5.3).
@@ -495,7 +500,7 @@ export class TableServer extends Server<Env> {
           // through afterMutation so the NEW hand's action clock is armed
           this.afterMutation();
         }
-      }, HAND_END_PAUSE_MS);
+      }, this.handEndPauseMs(base));
     }
 
     // Server-owned clocks (Step 6): the per-turn betting clock AND DFT's
@@ -572,6 +577,14 @@ export class TableServer extends Server<Env> {
   private isPaused(): boolean {
     if (this.variant === "dft") return this.dftPaused;
     return this.gm?.state().phase === "paused";
+  }
+
+  /** How long to hold a finished hand before the next deal. A DFT hand that
+   *  resolved through flips gets extra time so the reveal can play out. */
+  private handEndPauseMs(base: GameState): number {
+    const flips = base.variant === "dft" ? (base.dft?.flips.length ?? 0) : 0;
+    if (flips > 0) return Math.min(DFT_REVEAL_MAX_MS, DFT_REVEAL_BASE_MS + flips * DFT_REVEAL_PER_FLIP_MS);
+    return HAND_END_PAUSE_MS;
   }
 
   private announce(msg: string): void {
