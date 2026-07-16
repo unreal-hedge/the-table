@@ -12,7 +12,7 @@
 // ============================================================
 
 import type {
-  BettingRound, Card, DftDecision, DftView, GameConfig, GameState, HandResultShare,
+  BettingRound, Card, DftDecision, DftFlipView, DftView, GameConfig, GameState, HandResultShare,
   LedgerRow, Phase, PlayerAction, PlayerRecord, SeatView, SessionSummary,
 } from "../types";
 import type { TableEngine } from "../table-engine";
@@ -55,6 +55,9 @@ export class DoubleFlopManager implements TableEngine {
   private prepared: PreparedContest[] | null = null;
   private decisions = new Map<string, Decision>();
   private requiredDecisions: { potIndex: number; seat: number }[] = [];
+  // showdown flips in reveal order (rep flips from prepare, then the final flip
+  // from finalize). Exposed only at handEnded — never while decisions are blind.
+  private flipLog: DftFlipView[] = [];
   private lastDelta = new Map<number, number>();
   private phaseDeadline: number | null = null;
   // per-betting-turn action clock (mirrors NLHE; the server owns enforcement,
@@ -149,6 +152,7 @@ export class DoubleFlopManager implements TableEngine {
     this.prepared = null;
     this.decisions = new Map();
     this.requiredDecisions = [];
+    this.flipLog = [];
     this.lastDelta = new Map();
     this.handNumber += 1;
     this.phaseVal = "betting";
@@ -306,7 +310,9 @@ export class DoubleFlopManager implements TableEngine {
 
   private finishPicking(): void {
     const pots = this.betting!.sidePots();
-    this.prepared = prepareShowdown(pots, this.arrangements, this.dealt!.boards, this.rng);
+    // representation flips happen here (blind); they collect into flipLog but
+    // stay hidden until handEnded (state() gates the exposure).
+    this.prepared = prepareShowdown(pots, this.arrangements, this.dealt!.boards, this.rng, this.flipLog);
     this.requiredDecisions = [];
     for (const c of this.prepared) {
       for (const seat of decisionSeatsOf(c)) this.requiredDecisions.push({ potIndex: c.potIndex, seat });
@@ -354,7 +360,7 @@ export class DoubleFlopManager implements TableEngine {
   }
 
   private finalizeShowdown(): void {
-    const delta = finalizeShowdown(this.prepared!, this.decisions, this.arrangements, this.rng);
+    const delta = finalizeShowdown(this.prepared!, this.decisions, this.arrangements, this.rng, this.flipLog);
     this.settle(delta);
   }
 
@@ -484,6 +490,10 @@ export class DoubleFlopManager implements TableEngine {
       dft = {
         subPhase: this.phaseVal === "betting" ? "betting" : this.phaseVal === "picking" ? "picking" : "decisions",
         boards, picking, decisions,
+        // reveal the flips ONLY once the hand is over — during the blind
+        // decisions phase the rep-flip results already sit in flipLog but must
+        // not reach any client (they'd tip the run/surrender math).
+        flips: this.phaseVal === "handEnded" ? this.flipLog : [],
       };
     }
 

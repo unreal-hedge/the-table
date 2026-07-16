@@ -62,6 +62,8 @@ class Bot {
   sawDeclReveal = false;      // declarations ARE visible once the hand ends
   sawStrippedArr = false;     // an opponent LOCKED (public) yet their split stayed hidden — non-vacuous
   sawStrippedDecl = false;    // an opponent DECLARED (public) yet their choice stayed hidden — non-vacuous
+  flipLeak = false;           // a flip result arrived BEFORE the hand ended (must never happen)
+  sawFlipReveal = false;      // the flip log arrived at handEnded (for the reveal UI)
   order: number[];
   private arrHand = -1;
   private declared = new Set<string>();
@@ -109,6 +111,11 @@ class Bot {
       if (s.phase !== "handEnded" && seat.declarations !== undefined) this.declStripOk = false;
       if (s.phase === "handEnded" && seat.declarations !== undefined) this.sawDeclReveal = true;
       if (lockedDecl.has(seat.seat) && s.phase !== "handEnded" && seat.declarations === undefined) this.sawStrippedDecl = true;
+    }
+    // flip results resolve blind — they may only appear once the hand has ended
+    if ((s.dft?.flips?.length ?? 0) > 0) {
+      if (s.phase === "handEnded") this.sawFlipReveal = true;
+      else this.flipLeak = true;
     }
 
     // observe own 6 cards + flop-depth boards while a DFT hand is live
@@ -258,6 +265,8 @@ async function main() {
     check("no opponent's run/surrender leaks while blind", host.declStripOk && other.declStripOk);
     check("an opponent declared yet their choice stayed hidden (non-vacuous)", host.sawStrippedDecl || other.sawStrippedDecl);
     check("declarations become visible to all once the hand ends", host.sawDeclReveal || other.sawDeclReveal);
+    check("flip results never leak before the hand ends", !host.flipLeak && !other.flipLeak);
+    check("the flip log is revealed at handEnded (for the reveal UI)", host.sawFlipReveal || other.sawFlipReveal);
     check("hole cards stay stripped through the whole showdown", host.stripOk && other.stripOk);
     const total = host.ledger.reduce((t, r) => t + r.stack, 0);
     check("ledger conserved across showdown hands", total === 4000, `stacks total ${total}`);

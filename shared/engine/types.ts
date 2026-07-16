@@ -119,6 +119,18 @@ export interface DftContestView {
   // UI offers surrender only to these seats; the engine rejects it from others.
   surrenderSeats: number[];
 }
+/** One flip that happened at showdown, for the sequential reveal. Present only
+ *  at handEnded (a flip result must never reach a client while decisions are
+ *  still blind). `runout` is the fresh 5-card board that flip dealt. */
+export interface DftFlipView {
+  potIndex: number;
+  stage: "representation" | "final" | "guaranteed";
+  boardTag: "A" | "B" | null; // which physical board a representation flip stood in for
+  runout: Card[];             // the fresh 5-card flip board
+  hands: { seat: number; tex: [Card, Card] }[]; // the tex hands that flipped
+  winners: number[];          // seat(s) that won this flip (>1 = tie)
+  amount: number;             // chips this flip contested
+}
 export interface DftView {
   subPhase: DftSubPhase;
   boards: DftBoardsView;
@@ -131,6 +143,9 @@ export interface DftView {
     contests: DftContestView[];
     lockedSeats: { potIndex: number; seat: number }[];
   } | null;
+  // showdown flips, in reveal order (rep flips first, then the final flip).
+  // Empty until the hand ends — flips resolve blind, revealed only at handEnded.
+  flips: DftFlipView[];
 }
 
 export interface GameState {

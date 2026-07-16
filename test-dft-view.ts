@@ -131,11 +131,17 @@ const EXPECTED_DEPTH: Record<string, number> = { flop: 3, turn: 4, river: 5 };
   const seat0decls = s.seats.find((x) => x.seat === 0)?.declarations ?? [];
   check("full-truth carries the declaration value (filter will strip it)",
     seat0decls.length === 1 && seat0decls[0].decision === "run");
+  check("flips stay hidden through the blind decisions phase", (s.dft?.flips?.length ?? -1) === 0);
 
   gm.declare(1, contest!.potIndex, "run"); // both declared -> finalize
   s = gm.state();
   check("after both declare, hand ends", s.phase === "handEnded");
   check("handEnded reports a positive-delta winner", (s.lastHandResult?.length ?? 0) >= 1);
+  const flips = s.dft?.flips ?? [];
+  check("handEnded exposes exactly one final heads-up flip for the reveal",
+    flips.length === 1 && flips[0].stage === "final" && flips[0].boardTag === null);
+  check("the final flip carries a fresh 5-card runout + both tex hands + a winner",
+    flips[0]?.runout.length === 5 && flips[0]?.hands.length === 2 && (flips[0]?.winners.length ?? 0) >= 1);
 }
 
 // ---------- guaranteed banker: surrender IS allowed for the sole banker ----------
@@ -166,6 +172,37 @@ const EXPECTED_DEPTH: Record<string, number> = { flop: 3, turn: 4, river: 5 };
   let bankerSurrenderOk = true;
   try { gm.declare(0, contest!.potIndex, "surrender"); } catch { bankerSurrenderOk = false; }
   check("engine allows the banker to surrender -> hand ends", bankerSurrenderOk && gm.state().phase === "handEnded");
+}
+
+// ---------- both boards chopped: representation flips are logged for the reveal ----------
+{
+  const gm = new DoubleFlopManager(CONFIG, [
+    { id: "a", name: "A", buyIn: 2000 },
+    { id: "b", name: "B", buyIn: 2000 },
+  ], 7);
+  // both boards are royals ON the board -> every hand just plays the board ->
+  // both boards chop [0,1] -> two representation flips resolve at showdown.
+  gm.dealNextHand({
+    hole: new Map<number, Card[]>([
+      [0, H("2h", "3h", "2d", "3d", "4h", "5h")],
+      [1, H("6h", "7h", "8h", "9h", "4d", "5d")],
+    ]),
+    boards: { a: H("Ac", "Kc", "Qc", "Jc", "Tc"), b: H("As", "Ks", "Qs", "Js", "Ts") },
+  });
+  while (gm.state().dft?.subPhase === "betting") gm.act("check");
+  gm.pickingTimeout(); // lock both at default -> finishPicking runs the rep flips (blind)
+
+  if (gm.phase() === "decisions") {
+    check("rep flips stay hidden while decisions are still blind", (gm.state().dft?.flips?.length ?? -1) === 0);
+    for (const d of gm.pendingDecisions()) gm.declare(d.seat, d.potIndex, "run");
+  }
+  const s = gm.state();
+  check("both-chopped hand ends after its flips resolve", s.phase === "handEnded");
+  const reps = (s.dft?.flips ?? []).filter((f) => f.stage === "representation");
+  check("both boards' representation flips are logged (A and B) for the reveal",
+    reps.length >= 2 && reps.some((f) => f.boardTag === "A") && reps.some((f) => f.boardTag === "B"));
+  check("each representation flip carries a fresh 5-card runout + the chop's tex hands",
+    reps.every((f) => f.runout.length === 5 && f.hands.length === 2));
 }
 
 console.log(failures === 0 ? "\nDFT VIEW TESTS PASS ✅" : `\nDFT VIEW TESTS FAIL ❌ (${failures})`);

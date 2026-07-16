@@ -31,10 +31,17 @@
 // heads-up (2-player) resolution. A challenger who owns nothing must run.
 // ============================================================
 
-import type { Card } from "../types";
+import type { Card, DftFlipView } from "../types";
 import { bestHand, winnerIndices } from "./eval";
 import { freshDeckMinus } from "./deck";
 import type { SidePot } from "./betting";
+
+/** Optional collector for the sequential-reveal flip log. Threading it does
+ *  NOT change the rng stream — it only records what `flip()` already computes,
+ *  so every seeded test stays byte-identical whether or not a sink is passed. */
+export type FlipSink = DftFlipView[];
+const texHands = (hands: { seat: number; tex: [Card, Card] }[]) =>
+  hands.map((h) => ({ seat: h.seat, tex: h.tex }));
 
 export interface Arrangement {
   handA: [Card, Card]; // plays Board A
@@ -134,17 +141,24 @@ export function flip(
   return { board, winners: winnerIndices(evals).map((i) => hands[i].seat) };
 }
 
-/** Representation flip -> the tied winner set (length 1 = a clean champion,
- *  length >1 = a tie). ONE flip only: no re-runs, no seat-based fallback —
- *  a tie is resolved downstream by splitting the board's half (ruling #7). */
-function repFlipWinners(chop: number[], arrangements: Map<number, Arrangement>, rng: () => number): number[] {
-  return flip(chop.map((seat) => texOf(seat, arrangements)), rng).winners;
-}
-
-/** The seat(s) representing one board: the outright winner, or the tied
- *  winners of that board's representation flip. */
-function resolveSide(side: Side, arrangements: Map<number, Arrangement>, rng: () => number): number[] {
-  return "outright" in side ? [side.outright] : repFlipWinners(side.chop, arrangements, rng);
+/** The seat(s) representing one board: the outright winner, or the tied winners
+ *  of that board's representation flip (ONE flip only — a tie is resolved
+ *  downstream by splitting the board's half, ruling #7). When a sink context is
+ *  given, a representation flip records itself for the reveal. */
+function resolveSide(
+  side: Side,
+  arrangements: Map<number, Arrangement>,
+  rng: () => number,
+  ctx?: { sink: FlipSink; potIndex: number; boardTag: "A" | "B"; amount: number }
+): number[] {
+  if ("outright" in side) return [side.outright];
+  const hands = side.chop.map((seat) => texOf(seat, arrangements));
+  const res = flip(hands, rng);
+  ctx?.sink.push({
+    potIndex: ctx.potIndex, stage: "representation", boardTag: ctx.boardTag,
+    runout: res.board, hands: texHands(hands), winners: res.winners, amount: ctx.amount,
+  });
+  return res.winners;
 }
 
 // ---------- prepare / finalize ----------
@@ -171,7 +185,8 @@ export function prepareShowdown(
   pots: SidePot[],
   arrangements: Map<number, Arrangement>,
   boards: Boards,
-  rng: () => number
+  rng: () => number,
+  sink?: FlipSink
 ): PreparedContest[] {
   return planShowdown(pots, arrangements, boards).map((plan): PreparedContest => {
     if (plan.kind === "whole") return { kind: "whole", potIndex: plan.potIndex, amount: plan.amount, winner: plan.winner };
@@ -182,8 +197,8 @@ export function prepareShowdown(
       }
       return { kind: "gtdMulti", potIndex: plan.potIndex, amount: plan.amount, banker: plan.banker, chop: plan.chop };
     }
-    const repsA = resolveSide(plan.sideA, arrangements, rng);
-    const repsB = resolveSide(plan.sideB, arrangements, rng);
+    const repsA = resolveSide(plan.sideA, arrangements, rng, sink && { sink, potIndex: plan.potIndex, boardTag: "A", amount: plan.amount });
+    const repsB = resolveSide(plan.sideB, arrangements, rng, sink && { sink, potIndex: plan.potIndex, boardTag: "B", amount: plan.amount });
     // Only a clean single-rep-per-board result yields the heads-up final flip.
     // If either representation flip tied, no champion is crowned for that board
     // (ruling #7) — each board's half is split among its tied reps instead.
@@ -201,7 +216,8 @@ export function finalizeShowdown(
   prepared: PreparedContest[],
   decisions: Map<string, Decision>,
   arrangements: Map<number, Arrangement>,
-  rng: () => number
+  rng: () => number,
+  sink?: FlipSink
 ): SeatDelta {
   const delta: SeatDelta = new Map();
   const add = (seat: number, amt: number) => {
@@ -209,6 +225,12 @@ export function finalizeShowdown(
     delta.set(seat, (delta.get(seat) ?? 0) + amt);
   };
   const dec = (pot: number, seat: number): Decision => decisions.get(`${pot}:${seat}`) ?? "run";
+  // capture-and-log a flip (rng stream is identical to calling flip() inline)
+  const runFlip = (potIndex: number, stage: "final" | "guaranteed", hands: { seat: number; tex: [Card, Card] }[], amount: number) => {
+    const res = flip(hands, rng);
+    sink?.push({ potIndex, stage, boardTag: null, runout: res.board, hands: texHands(hands), winners: res.winners, amount });
+    return res.winners;
+  };
 
   for (const c of prepared) {
     if (c.kind === "whole") {
@@ -219,19 +241,19 @@ export function finalizeShowdown(
       if (da === "surrender" && db === "surrender") splitAmong([c.a, c.b], c.amount, add);
       else if (da === "run" && db === "surrender") payRunSurrender(c.a, c.b, c.amount, add);
       else if (da === "surrender" && db === "run") payRunSurrender(c.b, c.a, c.amount, add);
-      else splitAmong(flip([texOf(c.a, arrangements), texOf(c.b, arrangements)], rng).winners, c.amount, add);
+      else splitAmong(runFlip(c.potIndex, "final", [texOf(c.a, arrangements), texOf(c.b, arrangements)], c.amount), c.amount, add);
     } else if (c.kind === "gtdHeadsUp") {
       const banked = Math.floor(c.amount / 2);
       const contested = c.amount - banked;
       add(c.banker, banked);
       if (dec(c.potIndex, c.banker) === "surrender") payRunSurrender(c.other, c.banker, contested, add);
-      else splitAmong(flip([texOf(c.banker, arrangements), texOf(c.other, arrangements)], rng).winners, contested, add);
+      else splitAmong(runFlip(c.potIndex, "guaranteed", [texOf(c.banker, arrangements), texOf(c.other, arrangements)], contested), contested, add);
     } else if (c.kind === "gtdMulti") {
       const banked = Math.floor(c.amount / 2);
       const contested = c.amount - banked;
       add(c.banker, banked);
       // ONE flip; a tie splits the contested half among the tied winners (#7).
-      const winners = flip(c.chop.map((s) => texOf(s, arrangements)), rng).winners;
+      const winners = runFlip(c.potIndex, "guaranteed", c.chop.map((s) => texOf(s, arrangements)), contested);
       splitAmong(winners, contested, add);
     } else {
       // boardSplit: a representation flip tied, so no final flip happens.
