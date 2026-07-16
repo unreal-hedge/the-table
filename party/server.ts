@@ -159,12 +159,14 @@ export class TableServer extends Server<Env> {
     if (!playerId) return this.error(conn, "Join first");
 
     switch (msg.type) {
-      case "act":      return this.handleAct(conn, playerId, msg.action, msg.amount);
-      case "timeBank": return this.handleTimeBank(conn, playerId);
-      case "show":     return this.handleShow(conn, playerId);
-      case "chat":     return this.handleChat(conn, playerId, msg.text);
-      case "host":     return this.handleHost(conn, playerId, msg.cmd);
-      default:         return this.error(conn, "Unknown message type");
+      case "act":               return this.handleAct(conn, playerId, msg.action, msg.amount);
+      case "timeBank":          return this.handleTimeBank(conn, playerId);
+      case "show":              return this.handleShow(conn, playerId);
+      case "chat":              return this.handleChat(conn, playerId, msg.text);
+      case "submitArrangement": return this.handleSubmitArrangement(conn, playerId, msg.order);
+      case "declare":           return this.handleDeclare(conn, playerId, msg.potIndex, msg.decision);
+      case "host":              return this.handleHost(conn, playerId, msg.cmd);
+      default:                  return this.error(conn, "Unknown message type");
     }
   }
 
@@ -276,6 +278,50 @@ export class TableServer extends Server<Env> {
     // Same rule as act: only the seat the ENGINE says may show, may show.
     if (seat == null || g.state().canShowSeat !== seat) return this.error(conn, "You can't show right now");
     g.voluntaryShow(seat);
+    this.afterMutation();
+  }
+
+  /** DFT picking: lock this player's hand-split. The seat is derived from the
+   *  connection's identity — the message carries ONLY the order, so a player
+   *  can never lock an arrangement for anyone but themselves. The engine
+   *  enforces phase + showdown-membership + permutation-validity and throws. */
+  private handleSubmitArrangement(conn: Connection, playerId: string, order: number[]) {
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (!(g instanceof DoubleFlopManager)) return this.error(conn, "Not available in this mode");
+    if (this.isPaused()) return this.error(conn, "Game is paused");
+    const seat = this.seatOf(playerId);
+    if (seat == null) return this.error(conn, "You're not seated");
+    if (!Array.isArray(order) || order.length !== 6 || !order.every((n) => Number.isInteger(n))) {
+      return this.error(conn, "Bad arrangement");
+    }
+    try {
+      g.submitArrangement(seat, order);
+    } catch (e) {
+      console.error(`[TableServer] submitArrangement failed:`, e);
+      return this.error(conn, "Arrangement rejected");
+    }
+    this.afterMutation();
+  }
+
+  /** DFT decisions: this player's blind run/surrender for one pot. Same rule —
+   *  seat from identity, payload from the message. The engine enforces that the
+   *  seat actually owes THIS pot's decision and hasn't already answered. */
+  private handleDeclare(conn: Connection, playerId: string, potIndex: number, decision: string) {
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (!(g instanceof DoubleFlopManager)) return this.error(conn, "Not available in this mode");
+    if (this.isPaused()) return this.error(conn, "Game is paused");
+    const seat = this.seatOf(playerId);
+    if (seat == null) return this.error(conn, "You're not seated");
+    if (decision !== "run" && decision !== "surrender") return this.error(conn, "Bad decision");
+    if (!Number.isInteger(potIndex) || potIndex < 0) return this.error(conn, "Bad pot index");
+    try {
+      g.declare(seat, potIndex, decision);
+    } catch (e) {
+      console.error(`[TableServer] declare failed:`, e);
+      return this.error(conn, "Declaration rejected");
+    }
     this.afterMutation();
   }
 

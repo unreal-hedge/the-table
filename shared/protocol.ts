@@ -8,7 +8,7 @@
 // ============================================================
 
 import type {
-  GameConfig, GameState, LedgerRow, PlayerAction, SessionSummary, Variant,
+  DftDecision, GameConfig, GameState, LedgerRow, PlayerAction, SessionSummary, Variant,
 } from "./engine/types";
 
 // ---------- client → server ----------
@@ -22,6 +22,12 @@ export type ClientMessage =
   | { type: "timeBank" }               // +30s, actor only — server-verified (spec 5.2)
   | { type: "show" }                   // voluntary show after a fold-win (spec 9.1)
   | { type: "chat"; text: string }
+  // ---- DFT simultaneous phases (Step 6b) ----
+  // Both carry ONLY the payload — the acting seat is derived server-side from
+  // the connection's identity, NEVER trusted from the message. That's the whole
+  // anti-cheat point: you can lock/declare for YOUR seat and no one else's.
+  | { type: "submitArrangement"; order: number[] }               // picking: lock my 6-card split (a permutation of 0..5)
+  | { type: "declare"; potIndex: number; decision: DftDecision } // decisions: my blind run/surrender for one pot
   | { type: "host"; cmd: HostCommand };
 
 export type HostCommand =
