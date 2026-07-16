@@ -115,18 +115,57 @@ const EXPECTED_DEPTH: Record<string, number> = { flop: 3, turn: 4, river: 5 };
     contest ? `pot ${contest.potIndex} amount ${contest.amount}` : "none");
   check("nobody declared yet", (s.dft?.decisions?.lockedSeats.length ?? 0) === 0);
 
-  gm.declare(0, contest!.potIndex, "surrender"); // seat 0 declares (secret WHAT)
+  // R1: a plain heads-up flip has no banker, so surrender is offered to nobody
+  // and the engine rejects an attempt (must RUN).
+  check("heads-up flip is surrender-eligible for nobody (R1: banker-only)",
+    (contest?.surrenderSeats.length ?? -1) === 0);
+  let illegalSurrenderRejected = false;
+  try { gm.declare(0, contest!.potIndex, "surrender"); } catch { illegalSurrenderRejected = true; }
+  check("engine rejects an illegal heads-up surrender", illegalSurrenderRejected);
+  check("rejected surrender did not lock the seat", (gm.state().dft?.decisions?.lockedSeats.length ?? 0) === 0);
+
+  gm.declare(0, contest!.potIndex, "run"); // seat 0 declares RUN (secret WHAT)
   s = gm.state();
   check("decisions lockedSeats reflects WHO declared (never the WHAT)",
     s.dft?.decisions?.lockedSeats.some((l) => l.seat === 0) === true);
   const seat0decls = s.seats.find((x) => x.seat === 0)?.declarations ?? [];
   check("full-truth carries the declaration value (filter will strip it)",
-    seat0decls.length === 1 && seat0decls[0].decision === "surrender");
+    seat0decls.length === 1 && seat0decls[0].decision === "run");
 
   gm.declare(1, contest!.potIndex, "run"); // both declared -> finalize
   s = gm.state();
   check("after both declare, hand ends", s.phase === "handEnded");
   check("handEnded reports a positive-delta winner", (s.lastHandResult?.length ?? 0) >= 1);
+}
+
+// ---------- guaranteed banker: surrender IS allowed for the sole banker ----------
+{
+  const gm = new DoubleFlopManager(CONFIG, [
+    { id: "a", name: "A", buyIn: 2000 },
+    { id: "b", name: "B", buyIn: 2000 },
+  ], 42);
+  // seat0 wins board A outright AND ties board B (a board-royal both play) ->
+  // seat0 banks 50% and is the banker of a heads-up guaranteed contest.
+  gm.dealNextHand({
+    hole: new Map<number, Card[]>([
+      [0, H("Ah", "9h", "2h", "3h", "4c", "5d")],
+      [1, H("3c", "4d", "2s", "3s", "6h", "7d")],
+    ]),
+    boards: { a: H("Kh", "Qh", "Jh", "Th", "2c"), b: H("Ac", "Kc", "Qc", "Jc", "Tc") },
+  });
+  while (gm.state().dft?.subPhase === "betting") gm.act("check");
+  gm.submitArrangement(0, [0, 1, 2, 3, 4, 5]);
+  gm.submitArrangement(1, [0, 1, 2, 3, 4, 5]);
+
+  const s = gm.state();
+  check("guaranteed banker -> decisions phase", s.dft?.subPhase === "decisions");
+  const contest = s.dft?.decisions?.contests[0];
+  check("only the banker is asked to decide", contest?.seats.length === 1 && contest?.seats[0] === 0);
+  check("banker is the sole surrender-eligible seat",
+    contest?.surrenderSeats.length === 1 && contest?.surrenderSeats[0] === 0);
+  let bankerSurrenderOk = true;
+  try { gm.declare(0, contest!.potIndex, "surrender"); } catch { bankerSurrenderOk = false; }
+  check("engine allows the banker to surrender -> hand ends", bankerSurrenderOk && gm.state().phase === "handEnded");
 }
 
 console.log(failures === 0 ? "\nDFT VIEW TESTS PASS ✅" : `\nDFT VIEW TESTS FAIL ❌ (${failures})`);

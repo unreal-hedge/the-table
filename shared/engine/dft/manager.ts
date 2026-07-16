@@ -20,7 +20,7 @@ import { nextButtonSeat, clamp, ledgerRows } from "../util";
 import { Deck, makeRng } from "./deck";
 import { DftBetting, type BetActionType, type LegalBet } from "./betting";
 import {
-  prepareShowdown, finalizeShowdown, decisionSeatsOf,
+  prepareShowdown, finalizeShowdown, decisionSeatsOf, surrenderSeatsOf,
   type Arrangement, type Boards, type Decision, type PreparedContest,
 } from "./showdown";
 
@@ -334,6 +334,16 @@ export class DoubleFlopManager implements TableEngine {
       throw new Error(`seat ${seat} has no decision to make in pot ${potIndex}`);
     }
     if (this.decisions.has(key)) throw new Error("decision already made");
+    // R1: surrender is banker-only. A seat that doesn't own a guaranteed share
+    // may not surrender — it must run. Enforced here, at the live-game entry
+    // point, so a hacked client can't take the 30% buyout in a spot the rules
+    // forbid. (The pure resolver still handles a surrender if handed one.)
+    if (decision === "surrender") {
+      const contest = this.prepared?.find((c) => c.potIndex === potIndex);
+      if (!contest || !surrenderSeatsOf(contest).includes(seat)) {
+        throw new Error(`seat ${seat} may not surrender in pot ${potIndex} (banker-only, R1)`);
+      }
+    }
     this.decisions.set(key, decision);
     if (this.pendingDecisions().length === 0) this.finalizeShowdown();
   }
@@ -460,7 +470,10 @@ export class DoubleFlopManager implements TableEngine {
       let decisions: DftView["decisions"] = null;
       if (this.phaseVal === "decisions" && this.prepared) {
         const contests = this.prepared
-          .map((c) => ({ potIndex: c.potIndex, amount: c.amount, seats: decisionSeatsOf(c) }))
+          .map((c) => ({
+            potIndex: c.potIndex, amount: c.amount,
+            seats: decisionSeatsOf(c), surrenderSeats: surrenderSeatsOf(c),
+          }))
           .filter((c) => c.seats.length > 0);
         const lockedSeats = [...this.decisions.keys()].map((k) => {
           const [potIndex, seat] = k.split(":").map(Number);

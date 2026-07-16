@@ -8,7 +8,7 @@ import { strToCard } from "./shared/engine/dft/cards";
 import type { Card } from "./shared/engine/types";
 import type { SidePot } from "./shared/engine/dft/betting";
 import {
-  planShowdown, prepareShowdown, resolveShowdown,
+  planShowdown, prepareShowdown, resolveShowdown, surrenderSeatsOf,
   type Arrangement, type Boards, type DecisionFor,
 } from "./shared/engine/dft/showdown";
 
@@ -220,6 +220,30 @@ function guaranteed(eligible: number[]): { arrangements: Map<number, Arrangement
   check("#7c representation-flip tie -> boardSplit 250/250/500 (both choppers paid)", boardSplits > 0 && exactSplitOk, `${boardSplits} boardSplits`);
   check("#7c no seat-fallback: a tie never collapses to one champion", !collapsed);
   check("#7c pot always fully distributed", conserved);
+}
+
+// ---------- R1: surrender eligibility per contest kind (banker-only) ----------
+{
+  // plain heads-up (two outright board winners): nobody banked -> nobody may surrender
+  const hu = prepareShowdown(
+    [{ amount: 1000, eligibleSeats: [0, 1] }],
+    new Map<number, Arrangement>([
+      [0, arr(["Ah", "9h"], ["3h", "4h"], ["5c", "6c"])],
+      [1, arr(["3c", "4d"], ["As", "9s"], ["7d", "8d"])],
+    ]),
+    { a: board(["Kh", "Qh", "Jh", "Th", "2c"]), b: board(["Ks", "Qs", "Js", "Ts", "2d"]) },
+    makeRng(1),
+  )[0];
+  check("R1 heads-up contest: surrender-eligible seats == none", hu.kind === "headsup" && surrenderSeatsOf(hu).length === 0);
+
+  // guaranteed heads-up: banker owns the banked half -> banker only may surrender
+  const gh = prepareShowdown(guaranteed([0, 1]).pots, guaranteed([0, 1]).arrangements, guaranteed([0, 1]).boards, makeRng(1))[0];
+  check("R1 gtd heads-up: only the banker may surrender",
+    gh.kind === "gtdHeadsUp" && surrenderSeatsOf(gh).length === 1 && surrenderSeatsOf(gh)[0] === (gh as any).banker);
+
+  // guaranteed 3-way rep flip: still competing for the half -> nobody may surrender
+  const gm3 = prepareShowdown(guaranteed([0, 1, 2]).pots, guaranteed([0, 1, 2]).arrangements, guaranteed([0, 1, 2]).boards, makeRng(1))[0];
+  check("R1 gtd multi (3-way): surrender unavailable", surrenderSeatsOf(gm3).length === 0);
 }
 
 // ---------- conservation fuzz on real deals ----------

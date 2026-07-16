@@ -114,6 +114,10 @@ export interface DftContestView {
   potIndex: number;
   amount: number;   // chips contested in this pot's flip
   seats: number[];  // who is being asked to run/surrender here (public: who, not what)
+  // Which of those seats may actually SURRENDER (R1: banker-only — only a
+  // player who already owns a guaranteed share). Everyone else must RUN. The
+  // UI offers surrender only to these seats; the engine rejects it from others.
+  surrenderSeats: number[];
 }
 export interface DftView {
   subPhase: DftSubPhase;

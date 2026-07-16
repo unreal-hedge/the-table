@@ -103,9 +103,15 @@ function driveHand(m: DoubleFlopManager, rng: () => number, grand: number, seed:
     chip("post-picking");
   }
   if (m.phase() === "decisions") {
+    // R1: surrender only where the engine allows it (banker-only). Reading the
+    // view's surrenderSeats keeps the fuzz legal; an illegal surrender now throws.
+    const contests = m.state().dft?.decisions?.contests ?? [];
+    const maySurrender = (potIndex: number, seat: number) =>
+      contests.find((c) => c.potIndex === potIndex)?.surrenderSeats.includes(seat) ?? false;
     for (const d of [...m.pendingDecisions()]) {
       if (m.phase() !== "decisions") break;
-      m.declare(d.seat, d.potIndex, rng() < 0.5 ? "run" : "surrender");
+      const surrender = rng() < 0.5 && maySurrender(d.potIndex, d.seat);
+      m.declare(d.seat, d.potIndex, surrender ? "surrender" : "run");
       chip("declaring");
     }
     if (m.phase() === "decisions") m.decisionsTimeout();
@@ -326,15 +332,14 @@ function edgeMainSideOpposite(): void {
   driveAllIn(m); // everyone all-in -> main {0,1,2} + side {0,1}
   if (m.phase() === "picking") m.pickingTimeout();
   const pend = m.pendingDecisions();
-  const pots = [...new Set(pend.map((d) => d.potIndex))];
   check("#edge main+side: seat0 owes a decision in >1 pot", pend.filter((d) => d.seat === 0).length >= 2);
-  // opposite decisions for seat0 across its two pots
-  for (const d of pend) {
-    if (d.seat === 0) m.declare(0, d.potIndex, d.potIndex === pots[0] ? "run" : "surrender");
-    else m.declare(d.seat, d.potIndex, d.potIndex === pots[0] ? "surrender" : "run");
-  }
+  // Both pots are plain heads-up flips (two outright board winners), so under
+  // R1 nobody owns a guaranteed share and every seat must RUN each pot. The
+  // property preserved here is per-pot INDEPENDENCE + conservation across a
+  // main/side split (the banker-surrender path is covered by #edge guaranteed).
+  for (const d of pend) m.declare(d.seat, d.potIndex, "run");
   while (m.phase() === "decisions") m.decisionsTimeout();
-  check("#edge main+side: opposite per-pot decisions, conserved + ledger zero",
+  check("#edge main+side: independent per-pot decisions, conserved + ledger zero",
     m.chipTotal() === grand && m.ledger().reduce((a, r) => a + r.net, 0) === 0);
 }
 

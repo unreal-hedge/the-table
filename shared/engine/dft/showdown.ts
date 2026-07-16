@@ -155,6 +155,16 @@ export function decisionSeatsOf(c: PreparedContest): number[] {
   return [];
 }
 
+/** Which of a contest's decision seats may SURRENDER (R1: banker-only). Only a
+ *  player who already owns a guaranteed share of the pot may surrender — that is
+ *  ONLY the banker in a guaranteed-50% heads-up contest. In a plain heads-up
+ *  flip nobody has banked anything, so both must RUN. The resolver still *can*
+ *  math out a surrender if handed one (see finalizeShowdown + its tests); this
+ *  is the eligibility gate the live game enforces on `declare`. */
+export function surrenderSeatsOf(c: PreparedContest): number[] {
+  return c.kind === "gtdHeadsUp" ? [c.banker] : [];
+}
+
 /** Phase 1: resolve every pot's representation flips, so who-may-surrender is
  *  known. Consumes rng for the rep flips only. */
 export function prepareShowdown(
