@@ -65,9 +65,19 @@ export class DoubleFlopManager implements TableEngine {
   // viewer can see their own lock; defaults to 0..5 (the pre-filled split)
   private arrangementOrder = new Map<number, number[]>();
 
-  constructor(config: GameConfig, starters: DftStarter[], seed: number) {
+  constructor(config: GameConfig, starters: DftStarter[], seed: number, resume?: PlayerRecord[]) {
     this.config = config;
     this.rng = makeRng(seed);
+    if (resume) {
+      // mid-session engine handoff (mode switch): adopt the exact player
+      // records — stacks, buyInTotal (the ledger), sit-out — NO clamping,
+      // NO buyInTotal reset. Chips must be conserved across the switch.
+      if (resume.length > MAX_DFT_SEATS) {
+        throw new Error(`Double Flop Tex is ${MAX_DFT_SEATS}-max; got ${resume.length} players`);
+      }
+      for (const p of resume) this.players.set(p.id, { ...p });
+      return;
+    }
     if (starters.length > MAX_DFT_SEATS) {
       throw new Error(`Double Flop Tex is ${MAX_DFT_SEATS}-max; got ${starters.length} players`);
     }
@@ -104,10 +114,13 @@ export class DoubleFlopManager implements TableEngine {
 
   dealNextHand(override?: DealOverride): void {
     if (this.phaseVal === "ended") return;
+    this.applyPendingChips(); // approved rebuys land between hands (3.4)
     const bySeat = new Map([...this.players.values()].map((p) => [p.seat, p]));
     const eligibleSeats = override
       ? [...override.hole.keys()].sort((a, b) => a - b)
-      : [...this.players.values()].filter((p) => p.stack > 0).map((p) => p.seat).sort((a, b) => a - b);
+      : [...this.players.values()]
+          .filter((p) => !p.sittingOut && p.stack > 0) // sit-outs skip the deal (6.x)
+          .map((p) => p.seat).sort((a, b) => a - b);
     if (eligibleSeats.some((s) => (bySeat.get(s)?.stack ?? 0) <= 0)) {
       throw new Error("dealt an override seat with no chips");
     }
@@ -168,8 +181,70 @@ export class DoubleFlopManager implements TableEngine {
   }
   act(action: BetActionType, amount?: number): void {
     if (this.phaseVal !== "betting") throw new Error("not in a betting phase");
+    const actor = this.betting!.currentActor();
+    const p = actor != null ? this.playerAtSeat(actor) : undefined;
+    if (p) p.consecutiveTimeouts = 0; // a real action resets the timeout streak (6.1)
     this.betting!.act(action, amount);
     this.pumpBetting();
+  }
+
+  /** Betting-clock expiry (server-owned): auto check/fold the current actor,
+   *  and auto sit-out after two straight timeouts — mirrors NLHE (6.1). */
+  bettingTimeout(): void {
+    if (this.phaseVal !== "betting") return;
+    const seat = this.betting!.currentActor();
+    if (seat == null) return;
+    const legal = this.betting!.legal();
+    const auto: BetActionType = legal.actions.includes("check") ? "check" : "fold";
+    const p = this.playerAtSeat(seat);
+    if (p) {
+      p.consecutiveTimeouts += 1;
+      if (p.consecutiveTimeouts >= 2 && !p.sittingOut) p.sittingOut = true;
+    }
+    this.betting!.act(auto);
+    this.pumpBetting();
+  }
+
+  // ---------- session controls (mirror NLHE; pre-SessionCore duplication) ----------
+
+  toggleSitOut(playerId: string, out: boolean): void {
+    const p = this.players.get(playerId);
+    if (!p) return;
+    p.sittingOut = out;
+    if (!out) p.consecutiveTimeouts = 0;
+    // takes effect at next deal; the current hand is unaffected (6.2)
+  }
+
+  /** Host-approved rebuy, applied only between hands (3.4). */
+  approveAddChips(playerId: string, amount: number): void {
+    const p = this.players.get(playerId);
+    if (!p || amount <= 0) return;
+    const room = this.config.maxBuyIn - (p.stack + p.pendingAddChips);
+    const add = Math.max(0, Math.min(amount, room));
+    if (add === 0) return;
+    p.pendingAddChips += add;
+    if (this.phaseVal === "handEnded" || this.phaseVal === "lobby") this.applyPendingChips();
+  }
+
+  private applyPendingChips(): void {
+    for (const p of this.players.values()) {
+      if (p.pendingAddChips > 0) {
+        p.stack += p.pendingAddChips;
+        p.buyInTotal += p.pendingAddChips;
+        p.pendingAddChips = 0;
+      }
+    }
+  }
+
+  /** Exact snapshot of every player's session record, for a mid-session engine
+   *  handoff (mode switch) that must preserve stacks + ledger + sit-out. */
+  exportPlayers(): PlayerRecord[] {
+    return [...this.players.values()].map((p) => ({ ...p }));
+  }
+
+  private playerAtSeat(seat: number): PlayerRecord | undefined {
+    for (const p of this.players.values()) if (p.seat === seat) return p;
+    return undefined;
   }
 
   private pumpBetting(): void {

@@ -42,12 +42,20 @@ export class GameManager {
   private turnDeadlineAt: number | null = null;
   private pausedRemainingMs: number | null = null;
 
-  constructor(config: GameConfig, starters: StartPlayer[]) {
+  constructor(config: GameConfig, starters: StartPlayer[], resume?: PlayerRecord[]) {
     this.config = config;
     this.table = new Table(
       { smallBlind: config.smallBlind, bigBlind: config.bigBlind },
       MAX_SEATS
     );
+    if (resume) {
+      // mid-session engine handoff (mode switch): adopt exact player records —
+      // stacks, buyInTotal (the ledger), sit-out — NO clamping, NO reset, so
+      // chips are conserved across a variant switch.
+      for (const p of resume) this.players.set(p.id, { ...p });
+      this.pushLog(`Table created — blinds ${config.smallBlind}/${config.bigBlind}`);
+      return;
+    }
     starters.forEach((p, i) => {
       const buyIn = clamp(p.buyIn, config.minBuyIn, config.maxBuyIn);
       this.players.set(p.id, {
@@ -57,6 +65,12 @@ export class GameManager {
       });
     });
     this.pushLog(`Table created — blinds ${config.smallBlind}/${config.bigBlind}`);
+  }
+
+  /** Exact snapshot of every player's session record, for a mid-session engine
+   *  handoff (mode switch) that must preserve stacks + ledger + sit-out. */
+  exportPlayers(): PlayerRecord[] {
+    return [...this.players.values()].map((p) => ({ ...p }));
   }
 
   // ---------- session controls (host, spec §7) ----------
