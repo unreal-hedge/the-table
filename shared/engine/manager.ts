@@ -373,6 +373,7 @@ export class GameManager {
     const betsOnTable = seats.reduce((a, s) => a + s.betSize, 0);
 
     return {
+      variant: "nlhe",
       phase: this.phase,
       handNumber: this.handNumber,
       config: this.config,

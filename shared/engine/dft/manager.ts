@@ -11,7 +11,10 @@
 // the Step 6 filter on the wire.
 // ============================================================
 
-import type { Card, GameConfig, LedgerRow, PlayerRecord, SessionSummary } from "../types";
+import type {
+  BettingRound, Card, DftDecision, DftView, GameConfig, GameState, HandResultShare,
+  LedgerRow, Phase, PlayerAction, PlayerRecord, SeatView, SessionSummary,
+} from "../types";
 import type { TableEngine } from "../table-engine";
 import { nextButtonSeat, clamp, ledgerRows } from "../util";
 import { Deck, makeRng } from "./deck";
@@ -24,6 +27,8 @@ import {
 export const MAX_DFT_SEATS = 7; // 7×6 hole + two 5-card boards = 52 exactly (no burns); 8 is impossible
 const INCREMENT = 50;
 const PICK_DECIDE_SEC = 30;
+// DFT's 3 betting rounds reuse NLHE's shared `round` tag for display (no preflop).
+const ROUND_TAG: BettingRound[] = ["flop", "turn", "river"];
 
 export type DftPhase = "lobby" | "betting" | "picking" | "decisions" | "handEnded" | "ended";
 
@@ -52,6 +57,13 @@ export class DoubleFlopManager implements TableEngine {
   private requiredDecisions: { potIndex: number; seat: number }[] = [];
   private lastDelta = new Map<number, number>();
   private phaseDeadline: number | null = null;
+  // per-betting-turn action clock (mirrors NLHE; the server owns enforcement,
+  // this just surfaces turnStartedAt/turnDeadlineAt in the GameState snapshot)
+  private turnStartedAt: number | null = null;
+  private turnDeadlineAt: number | null = null;
+  // the submitted hand-split ORDER per seat (a permutation of 0..5), so a
+  // viewer can see their own lock; defaults to 0..5 (the pre-filled split)
+  private arrangementOrder = new Map<number, number[]>();
 
   constructor(config: GameConfig, starters: DftStarter[], seed: number) {
     this.config = config;
@@ -119,6 +131,7 @@ export class DoubleFlopManager implements TableEngine {
     );
 
     this.arrangements = new Map();
+    this.arrangementOrder = new Map();
     this.lockedPick = new Set();
     this.prepared = null;
     this.decisions = new Map();
@@ -163,7 +176,12 @@ export class DoubleFlopManager implements TableEngine {
     const b = this.betting!;
     while (b.status() === "roundComplete") b.beginNextRound(); // all cards pre-dealt; just advance
     if (b.isComplete()) this.postBetting();
-    else this.phaseVal = "betting";
+    else {
+      this.phaseVal = "betting";
+      // arm the per-turn clock for the new actor (server enforces; UI displays)
+      this.turnStartedAt = Date.now();
+      this.turnDeadlineAt = Date.now() + this.config.actionTimeSec * 1000;
+    }
   }
 
   private postBetting(): void {
@@ -178,9 +196,12 @@ export class DoubleFlopManager implements TableEngine {
     for (const s of this.showdownSeats) {
       const h = this.dealt!.hole.get(s)!;
       this.arrangements.set(s, defaultArrangement(h)); // pre-filled, always playable
+      this.arrangementOrder.set(s, [0, 1, 2, 3, 4, 5]); // the default split's order
     }
     this.phaseVal = "picking";
     this.phaseDeadline = Date.now() + PICK_DECIDE_SEC * 1000;
+    this.turnStartedAt = null;
+    this.turnDeadlineAt = null;
   }
 
   // ----- picking phase (simultaneous) -----
@@ -197,6 +218,7 @@ export class DoubleFlopManager implements TableEngine {
     if (this.lockedPick.has(seat)) throw new Error("arrangement already locked");
     if (!isPermutation6(order)) throw new Error("arrangement must be a permutation of 0..5");
     this.arrangements.set(seat, arrangementFromOrder(this.dealt!.hole.get(seat)!, order));
+    this.arrangementOrder.set(seat, [...order]);
     this.lockedPick.add(seat);
     if (this.showdownSeats.every((s) => this.lockedPick.has(s))) this.finishPicking();
   }
@@ -260,6 +282,8 @@ export class DoubleFlopManager implements TableEngine {
     this.lastDelta = delta;
     this.phaseVal = "handEnded";
     this.phaseDeadline = null;
+    this.turnStartedAt = null;
+    this.turnDeadlineAt = null;
   }
 
   // ---------- inspection (tests / future view mapping) ----------
@@ -287,6 +311,127 @@ export class DoubleFlopManager implements TableEngine {
   }
   lastHandDelta(): Map<number, number> {
     return new Map(this.lastDelta);
+  }
+
+  /** Full-truth GameState snapshot (Step 6 seam). Carries EVERY seat's hole
+   *  cards, arrangement, and declarations — the filter strips other seats'
+   *  secrets per viewer, exactly as it does for NLHE hole cards. Board cards
+   *  beyond the current reveal depth are omitted for EVERYONE (a future board
+   *  card must never reach any client). */
+  state(): GameState {
+    const b = this.betting;
+    const live = this.handInProgress() && b != null; // betting|picking|decisions
+    const bySeat = new Map([...this.players.values()].map((p) => [p.seat, p]));
+    const dealtIn = new Set(this.eligible);
+    const actor = this.phaseVal === "betting" ? b!.currentActor() : null;
+    // hole cards + arrangement become public only AFTER picking locks
+    const cardsRevealed = this.phaseVal === "decisions" || this.phaseVal === "handEnded";
+
+    const phase: Phase =
+      this.phaseVal === "lobby" ? "lobby"
+      : this.phaseVal === "ended" ? "ended"
+      : this.phaseVal === "handEnded" ? "handEnded"
+      : "inHand";
+
+    // board reveal depth: flops(3) in round 0, +turn(4) round 1, +river(5)
+    // round 2; full at showdown. Never expose beyond this to ANYONE.
+    const revealCount = this.phaseVal === "betting" ? 3 + b!.roundNumber() : 5;
+    const bf = this.dealt?.boards;
+    const boards = bf
+      ? { a: bf.a.slice(0, revealCount), b: bf.b.slice(0, revealCount) }
+      : { a: [], b: [] };
+
+    const seats: SeatView[] = [...this.players.values()]
+      .sort((x, y) => x.seat - y.seat)
+      .map((p): SeatView => {
+        const inHandNow = live && dealtIn.has(p.seat);
+        const folded = inHandNow ? b!.isFolded(p.seat) : false;
+        const isShowdownSeat = this.showdownSeats.includes(p.seat);
+        const decls: { potIndex: number; decision: DftDecision }[] = [];
+        for (const [key, d] of this.decisions) {
+          const [pi, s] = key.split(":").map(Number);
+          if (s === p.seat) decls.push({ potIndex: pi, decision: d });
+        }
+        return {
+          seat: p.seat,
+          id: p.id,
+          name: p.name,
+          stack: inHandNow ? b!.stackOf(p.seat) : p.stack,
+          betSize: this.phaseVal === "betting" && dealtIn.has(p.seat) ? b!.roundBetOf(p.seat) : 0,
+          inHand: inHandNow && !folded,
+          folded,
+          sittingOut: p.sittingOut,
+          isButton: live ? this.lastButton === p.seat : false,
+          isTurn: actor === p.seat,
+          holeCards: inHandNow ? (this.dealt!.hole.get(p.seat) ?? null) : null,
+          revealed: cardsRevealed && isShowdownSeat && !folded,
+          lastAction: null, // DFT betting-action badges: deferred to the UI step
+          timeBank: p.timeBank,
+          arrangement: inHandNow && isShowdownSeat ? (this.arrangementOrder.get(p.seat) ?? null) : null,
+          declarations: decls.length ? decls : undefined,
+        };
+      });
+
+    const legal = this.phaseVal === "betting" ? b!.legal() : null;
+    const canBetOrRaise = !!legal && legal.actions.some((a) => a === "bet" || a === "raise");
+    const windowLive = this.phaseVal === "picking" || this.phaseVal === "decisions";
+
+    let dft: DftView | undefined;
+    if (this.phaseVal !== "lobby" && this.phaseVal !== "ended") {
+      const picking =
+        this.phaseVal === "picking"
+          ? { deadlineAt: this.phaseDeadline, seats: [...this.showdownSeats], lockedSeats: [...this.lockedPick] }
+          : null;
+      let decisions: DftView["decisions"] = null;
+      if (this.phaseVal === "decisions" && this.prepared) {
+        const contests = this.prepared
+          .map((c) => ({ potIndex: c.potIndex, amount: c.amount, seats: decisionSeatsOf(c) }))
+          .filter((c) => c.seats.length > 0);
+        const lockedSeats = [...this.decisions.keys()].map((k) => {
+          const [potIndex, seat] = k.split(":").map(Number);
+          return { potIndex, seat };
+        });
+        decisions = { deadlineAt: this.phaseDeadline, contests, lockedSeats };
+      }
+      dft = {
+        subPhase: this.phaseVal === "betting" ? "betting" : this.phaseVal === "picking" ? "picking" : "decisions",
+        boards, picking, decisions,
+      };
+    }
+
+    const lastHandResult: HandResultShare[] | null =
+      this.phaseVal === "handEnded"
+        ? [...this.lastDelta.entries()]
+            .filter(([, amt]) => amt > 0)
+            .map(([seat, amt]) => ({
+              seat, name: bySeat.get(seat)?.name ?? `Seat ${seat + 1}`,
+              amountWon: amt, handName: null, cards: null,
+            }))
+        : null;
+
+    return {
+      variant: "dft",
+      phase,
+      handNumber: this.handNumber,
+      config: this.config,
+      seats,
+      communityCards: [], // DFT has two boards; the UI reads state.dft.boards
+      pots: live ? b!.sidePots().map((sp) => ({ size: sp.amount, eligibleSeats: sp.eligibleSeats })) : [],
+      totalPot: live ? b!.totalPot() : 0,
+      round: this.phaseVal === "betting" ? (ROUND_TAG[b!.roundNumber()] ?? null) : null,
+      playerToAct: actor,
+      legalActions: legal ? (legal.actions as PlayerAction[]) : null,
+      betRange: canBetOrRaise ? { min: legal!.minRaiseTo, max: legal!.maxRaiseTo } : null,
+      callAmount: legal ? legal.callAmount : 0,
+      turnStartedAt: this.phaseVal === "betting"
+        ? this.turnStartedAt
+        : windowLive && this.phaseDeadline != null ? this.phaseDeadline - PICK_DECIDE_SEC * 1000 : null,
+      turnDeadlineAt: this.phaseVal === "betting" ? this.turnDeadlineAt : windowLive ? this.phaseDeadline : null,
+      lastHandResult,
+      log: [], // DFT dealer log: deferred to the UI step
+      canShowSeat: null,
+      dft,
+    };
   }
 
   /** Total chips in play right now — invariant: always equals total bought in.

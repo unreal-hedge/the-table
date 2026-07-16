@@ -60,9 +60,18 @@ export interface SeatView {
   isTurn: boolean;
   holeCards: Card[] | null; // engine always includes them in hot-seat mode;
                             // in multiplayer (1b) the server strips these per-viewer
+                            // (DFT carries 6 here instead of 2)
   revealed: boolean;        // face-up (showdown / voluntary show)
   lastAction: string | null; // "RAISE 600", "FOLD" — the Pokerist-style badge
   timeBank: number;
+
+  // ---- DFT-only (variant === "dft"), SECRET like holeCards ----
+  // The seat's locked hand-split order (a permutation of 0..5) and its
+  // run/surrender declarations. The full-truth state carries every seat's
+  // values; the filter strips OTHER seats' pre-reveal, exactly like holeCards.
+  // `null`/absent means "not this variant, or not locked/declared yet".
+  arrangement?: number[] | null;
+  declarations?: { potIndex: number; decision: DftDecision }[];
 }
 
 export type Phase =
@@ -71,6 +80,15 @@ export type Phase =
   | "handEnded"    // showing results, waiting for next deal
   | "paused"       // host paused (7.2)
   | "ended";       // session stopped, ledger final (7.3)
+
+/** Which engine produced this snapshot (Step 6 seam discriminator). */
+export type Variant = "nlhe" | "dft";
+
+/** DFT run/surrender declaration (mirrors the engine's Decision). */
+export type DftDecision = "run" | "surrender";
+
+/** DFT sub-phase inside `phase: "inHand"`. */
+export type DftSubPhase = "betting" | "picking" | "decisions";
 
 export interface PotView {
   size: number;
@@ -85,7 +103,34 @@ export interface HandResultShare {
   cards: Card[] | null;     // best five, when known
 }
 
+/** DFT public/global view (variant === "dft"). Per-seat secrets
+ *  (hole cards, arrangement, declarations) live on SeatView; this
+ *  carries only board + phase + WHO-has-locked, all public. */
+export interface DftBoardsView {
+  a: Card[]; // Board A — REVEALED cards only (flop→turn→river as rounds complete)
+  b: Card[]; // Board B — REVEALED cards only
+}
+export interface DftContestView {
+  potIndex: number;
+  amount: number;   // chips contested in this pot's flip
+  seats: number[];  // who is being asked to run/surrender here (public: who, not what)
+}
+export interface DftView {
+  subPhase: DftSubPhase;
+  boards: DftBoardsView;
+  // picking phase: who's involved + who has locked (both public "who")
+  picking: { deadlineAt: number | null; seats: number[]; lockedSeats: number[] } | null;
+  // decisions phase: the contests + who has declared (public); the WHAT
+  // (each seat's decision) rides SeatView.declarations, stripped per viewer.
+  decisions: {
+    deadlineAt: number | null;
+    contests: DftContestView[];
+    lockedSeats: { potIndex: number; seat: number }[];
+  } | null;
+}
+
 export interface GameState {
+  variant: Variant;                 // which engine produced this (Step 6 seam)
   phase: Phase;
   handNumber: number;
   config: GameConfig;
@@ -103,6 +148,7 @@ export interface GameState {
   lastHandResult: HandResultShare[] | null;
   log: string[];                    // dealer log, newest last
   canShowSeat: number | null;       // fold-win: this seat may voluntarily show (9.1)
+  dft?: DftView;                    // present iff variant === "dft"
 }
 
 /** Ledger rows (3.6). */
