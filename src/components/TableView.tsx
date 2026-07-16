@@ -17,6 +17,7 @@ import { ActionBar } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
 import { DftPicking } from "./DftPicking";
+import { DftDecisions } from "./DftDecisions";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
@@ -207,13 +208,24 @@ export function TableView({
         )
       )}
 
-      {s.dft && s.dft.subPhase === "decisions" && (
-        <div className="veil">
-          <div>
-            <div className="msg">Run or surrender…</div>
-            <div className="hint">Players are making their blind run/surrender calls.</div>
+      {s.dft && s.dft.subPhase === "decisions" && s.dft.decisions && (
+        onDeclare && mode === "online" ? (
+          <DftDecisions
+            key={s.handNumber}
+            decisions={s.dft.decisions}
+            mySeat={mySeat}
+            deadlineAt={s.turnDeadlineAt}
+            displayNow={displayNow}
+            onDeclare={onDeclare}
+          />
+        ) : (
+          <div className="veil">
+            <div>
+              <div className="msg">Run or surrender…</div>
+              <div className="hint">Players are making their blind run/surrender calls.</div>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {s.phase === "paused" && (
