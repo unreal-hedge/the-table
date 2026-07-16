@@ -16,7 +16,9 @@
 // ============================================================
 
 import { GameManager } from "./shared/engine/manager";
+import { DoubleFlopManager } from "./shared/engine/dft/manager";
 import { DEFAULT_CONFIG } from "./shared/engine/types";
+import type { Card } from "./shared/engine/types";
 import { filterStateFor } from "./party/filter";
 
 const gm = new GameManager(DEFAULT_CONFIG, [
@@ -123,5 +125,134 @@ if (strippedChecks < 1000) fail(`too few strip checks fired (${strippedChecks})`
 if (revealChecks < 50) fail(`too few showdown reveal checks fired (${revealChecks})`);
 if (ownCardChecks < 500) fail(`too few own-cards-present checks fired (${ownCardChecks})`);
 
-console.log(`hands: ${hands} · hidden-card strips verified: ${strippedChecks} · showdown reveals verified: ${revealChecks} · own cards present: ${ownCardChecks}`);
+console.log(`NLHE — hands: ${hands} · hidden-card strips: ${strippedChecks} · showdown reveals: ${revealChecks} · own cards present: ${ownCardChecks}`);
+
+// ============================================================
+// DOUBLE FLOP TEX — the two secrets NLHE doesn't have:
+//   arrangement (the hand-split) rides the SAME reveal gate as
+//   holeCards; declarations (run/surrender) stay blind through the
+//   WHOLE decisions phase and go public only at handEnded.
+//
+// We craft one hand that forces a heads-up flip contest (board A
+// won outright by seat 0, board B by seat 1) so BOTH seats owe a
+// run/surrender decision — the only way to exercise the declaration
+// gate. Then we inspect the filter at picking / decisions / ended.
+// ============================================================
+
+const C = (rank: Card["rank"], suit: Card["suit"]): Card => ({ rank, suit });
+// seat 0: AA plays board A (crushes it); 34 plays board B (whiffs); tex = 89.
+const HOLE0: Card[] = [C("A", "clubs"), C("A", "diamonds"), C("3", "diamonds"), C("4", "diamonds"), C("8", "diamonds"), C("9", "diamonds")];
+// seat 1: 34 whiffs board A; KK trips board B (crushes it); tex = TJ.
+const HOLE1: Card[] = [C("3", "clubs"), C("4", "clubs"), C("K", "spades"), C("K", "hearts"), C("T", "diamonds"), C("J", "diamonds")];
+const BOARDS = {
+  a: [C("2", "clubs"), C("5", "diamonds"), C("9", "spades"), C("J", "hearts"), C("Q", "diamonds")], // AA (seat 0) beats Q-high (seat 1)
+  b: [C("6", "spades"), C("7", "diamonds"), C("8", "clubs"), C("T", "hearts"), C("K", "diamonds")], // KKK (seat 1) beats K-high (seat 0)
+};
+
+let dftArrStrips = 0;   // "other seat's arrangement is hidden" assertions that fired
+let dftArrReveals = 0;  // "revealed arrangement is visible to all" assertions that fired
+let dftDeclStrips = 0;  // "other seat's declaration is hidden" assertions that fired
+let dftDeclReveals = 0; // "declaration visible to all once hand ends" assertions that fired
+
+const dft = new DoubleFlopManager(
+  { ...DEFAULT_CONFIG, bigBlind: 200 },
+  [{ id: "a", name: "A", buyIn: 2000 }, { id: "b", name: "B", buyIn: 2000 }],
+  1, // fixed seed — no rng consumed before the decisions phase anyway (both boards outright)
+);
+
+/** After each declare/submit the LAST seat may finalize the hand, so we
+ *  inspect the FILTERED views for every viewer at a chosen moment. */
+function dftCheck(momentLabel: string, expect: {
+  cardsHidden: boolean;   // picking: hole+arrangement stripped for others
+  declsPresent: boolean;  // is there at least one declaration on the books?
+}) {
+  const truth = dft.state();
+  const viewers: (number | null)[] = [0, 1, null];
+  for (const viewer of viewers) {
+    const view = filterStateFor(truth, viewer);
+    for (const seat of view.seats) {
+      const real = truth.seats.find((r) => r.seat === seat.seat)!;
+      const isOwner = seat.seat === viewer;
+
+      // ---- arrangement (rides the holeCards reveal gate) ----
+      if (!isOwner && real.arrangement != null) {
+        if (real.revealed) {
+          if (JSON.stringify(seat.arrangement) !== JSON.stringify(real.arrangement)) {
+            fail(`[${momentLabel}] revealed arrangement of seat ${seat.seat} hidden from viewer ${String(viewer)}`);
+          }
+          dftArrReveals++;
+        } else {
+          if (seat.arrangement != null) {
+            fail(`[${momentLabel}] viewer ${String(viewer)} can see seat ${seat.seat}'s UN-revealed arrangement`);
+          }
+          dftArrStrips++;
+        }
+      }
+      if (isOwner && real.arrangement != null && JSON.stringify(seat.arrangement) !== JSON.stringify(real.arrangement)) {
+        fail(`[${momentLabel}] viewer ${String(viewer)} lost their OWN arrangement`);
+      }
+
+      // ---- declarations (blind through the whole decisions phase) ----
+      if (!isOwner && real.declarations && real.declarations.length) {
+        if (truth.phase === "handEnded") {
+          if (JSON.stringify(seat.declarations) !== JSON.stringify(real.declarations)) {
+            fail(`[${momentLabel}] ended-hand declaration of seat ${seat.seat} hidden from viewer ${String(viewer)}`);
+          }
+          dftDeclReveals++;
+        } else {
+          if (seat.declarations !== undefined) {
+            fail(`[${momentLabel}] viewer ${String(viewer)} can see seat ${seat.seat}'s BLIND declaration`);
+          }
+          dftDeclStrips++;
+        }
+      }
+      if (isOwner && real.declarations && JSON.stringify(seat.declarations) !== JSON.stringify(real.declarations)) {
+        fail(`[${momentLabel}] viewer ${String(viewer)} lost their OWN declaration`);
+      }
+    }
+  }
+  // sanity: the moment is the one we think it is
+  if (expect.cardsHidden && truth.seats.some((s) => s.revealed)) {
+    fail(`[${momentLabel}] expected no reveals yet, but a seat is revealed`);
+  }
+  const anyDecl = truth.seats.some((s) => s.declarations && s.declarations.length);
+  if (expect.declsPresent !== anyDecl) {
+    fail(`[${momentLabel}] expected declarations present=${expect.declsPresent}, saw ${anyDecl}`);
+  }
+}
+
+dft.dealNextHand({ hole: new Map([[0, HOLE0], [1, HOLE1]]), boards: BOARDS });
+// drive betting: nobody bets, both check every round → reach picking
+let dftSafety = 0;
+while (dft.phase() === "betting" && dftSafety++ < 100) {
+  const legal = dft.legal();
+  dft.act(legal.actions.includes("check") ? "check" : "call");
+}
+if (dft.phase() !== "picking") fail(`expected picking, got ${dft.phase()}`);
+
+// seat 0 locks a NON-default split (within-pair swaps: same hands, different
+// order array) so the strip assertion isn't vacuous; seat 1 stays default.
+dft.submitArrangement(0, [1, 0, 3, 2, 5, 4]);
+if (dft.phase() !== "picking") fail("picking ended before seat 1 locked");
+dftCheck("picking", { cardsHidden: true, declsPresent: false });
+
+dft.submitArrangement(1, [0, 1, 2, 3, 4, 5]);
+if (dft.phase() !== "decisions") fail(`expected decisions (forced heads-up), got ${dft.phase()}`);
+
+// seat 0 declares first → still decisions, one BLIND declaration on the books
+dft.declare(0, 0, "run");
+if (dft.phase() !== "decisions") fail("decisions ended before seat 1 declared");
+dftCheck("decisions", { cardsHidden: false, declsPresent: true });
+
+// seat 1 declares → hand finalizes; declarations become public
+dft.declare(1, 0, "run");
+if (dft.phase() !== "handEnded") fail(`expected handEnded, got ${dft.phase()}`);
+dftCheck("handEnded", { cardsHidden: false, declsPresent: true });
+
+if (dftArrStrips < 2) fail(`too few DFT arrangement strips fired (${dftArrStrips})`);
+if (dftArrReveals < 2) fail(`too few DFT arrangement reveals fired (${dftArrReveals})`);
+if (dftDeclStrips < 2) fail(`too few DFT declaration strips fired (${dftDeclStrips})`);
+if (dftDeclReveals < 2) fail(`too few DFT declaration reveals fired (${dftDeclReveals})`);
+
+console.log(`DFT  — arrangement strips: ${dftArrStrips} · reveals: ${dftArrReveals} · declaration strips: ${dftDeclStrips} · reveals: ${dftDeclReveals}`);
 console.log("FILTER: NO LEAKS ✅");
