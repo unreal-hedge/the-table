@@ -55,7 +55,7 @@ Host chooses Cash or SNG in the lobby (spec 1.2). SNG: 100k fixed stacks, blinds
 
 ---
 
-## PHASE 1D — DOUBLE FLOP TEX  *(unblocked — planning)*
+## PHASE 1D — DOUBLE FLOP TEX  *(built + deployed — two-device gate pending)*
 
 Blocker resolved: `docs/double-flop-tex-answers.md` now exists with Parth's answers to the 7 open questions and the full ruleset. **That doc is the law for 1D — where it and any other doc disagree, it wins.**
 
@@ -63,7 +63,14 @@ Fully custom variant — use `pokersolver` for hand evaluation, build as a separ
 
 **Run-it-twice is NOT part of 1D.** It was never specced for the two-board flip structure and is split out to its own later phase (see below).
 
-**Gate:** new variant test passes 200+ random hands with chip conservation.
+**Built so far (all deployed, all tests green):**
+- Engine `DoubleFlopManager` + invariant test (`test-dft*.ts`): 200+ hand conservation, showdown correctness, R1 banker-only surrender enforced at `declare()`.
+- Step 6 seam: host game-mode config + mid-session NLHE↔DFT switch (conserved ledger), `filter.ts` strips arrangements + declarations per viewer, `submitArrangement`/`declare` wire messages (seat from identity), engine flip-log — all proven over the wire in `test-online-dft.ts`.
+- Playable UI: two-board table, tap-to-swap hand-split picker, blind run/surrender modal, sequential flip reveal. Mobile-first, screenshot-verified desktop + 375px.
+
+**Gate (pending — Kabir + Parth, two real devices):** a full DFT session with a chopped board → flip → surrender, plus one NLHE→DFT→NLHE switch, ledger zero-sum.
+
+*Doc note:* `R1` in the answers doc says surrender enforcement needed "no code change" — that was inaccurate; the engine let either player surrender a plain heads-up flip. Enforcement was added at `manager.declare()` (banker-only). Worth telling Parth (engine owner).
 
 ---
 
