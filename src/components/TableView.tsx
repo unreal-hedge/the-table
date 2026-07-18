@@ -56,6 +56,8 @@ interface Props {
   onDeclare?: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
   onAddChips?: (id: string, amount: number) => void;
   onSitToggle?: (id: string, out: boolean) => void;
+  onRequestSeat?: (seat: number) => void;                                                 // spectator taps an empty seat (item 2)
+  onSeatRequest?: (playerId: string, action: "accept" | "reject" | "ignore", stack?: number) => void; // admin resolves it
 }
 
 export function TableView({
@@ -63,6 +65,7 @@ export function TableView({
   connectedIds, chat, myId, onChat, corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
   onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
+  onRequestSeat, onSeatRequest,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
@@ -174,20 +177,46 @@ export function TableView({
       {s.seats.map((v, i) => {
         const p = seatPos(i, n);
         const peeking = mode === "online" ? v.seat === mySeat : peekSeat === v.seat;
+        // a spectator (not seated) may tap an empty seat to request it (item 2)
+        const canRequest = mode === "online" && mySeat == null && !!v.empty && !!onRequestSeat;
         return (
-          <Seat key={v.id} view={v}
+          <Seat key={v.seat} view={v}
             x={p.x} y={p.y} betX={p.bx} betY={p.by}
             timerPct={v.isTurn ? timerPct : null}
             peeking={peeking}
             peekable={mode === "hotseat"}
-            offline={connectedIds ? !connectedIds.has(v.id) : false}
+            offline={connectedIds && !v.empty ? !connectedIds.has(v.id) : false}
             bubble={bubbleBySeatId.get(v.id) ?? null}
             backCount={s.dft ? 6 : 2}
+            canRequest={canRequest}
+            onRequestSeat={() => onRequestSeat?.(v.seat)}
             onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
             winBadge={winBySeat.get(v.seat) ?? null}
           />
         );
       })}
+
+      {/* Admin seat-request queue (item 2): accept / edit-stack / reject / ignore. */}
+      {isHost && onSeatRequest && s.seatRequests && s.seatRequests.length > 0 && (
+        <div className="seat-requests">
+          <div className="sr-title">Seat requests</div>
+          {s.seatRequests.map((rq) => (
+            <div key={rq.playerId} className="sr-row">
+              <span className="sr-name">{rq.name} → seat {rq.seat + 1}{rq.ignored ? " · ignored" : ""}</span>
+              <div className="sr-btns">
+                <button onClick={() => onSeatRequest(rq.playerId, "accept")}>Accept</button>
+                <button onClick={() => {
+                  const val = window.prompt(`Buy-in for ${rq.name}?`, String(s.config.defaultBuyIn));
+                  const amt = val == null ? NaN : Number(val);
+                  if (Number.isFinite(amt) && amt > 0) onSeatRequest(rq.playerId, "accept", amt);
+                }}>Edit stack</button>
+                <button onClick={() => onSeatRequest(rq.playerId, "reject")}>Reject</button>
+                {!rq.ignored && <button onClick={() => onSeatRequest(rq.playerId, "ignore")}>Ignore</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {canShow && (
         <div className="side-controls" style={{ top: "auto", bottom: 130 }}>

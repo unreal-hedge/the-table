@@ -28,6 +28,7 @@ export type ClientMessage =
   // anti-cheat point: you can lock/declare for YOUR seat and no one else's.
   | { type: "submitArrangement"; order: number[] }               // picking: lock my 6-card split (a permutation of 0..5)
   | { type: "declare"; potIndex: number; decision: DftDecision } // decisions: my blind run/surrender for one pot
+  | { type: "requestSeat"; seat: number }                        // spectator asks an admin for an empty numbered seat (item 2)
   | { type: "host"; cmd: HostCommand };
 
 export type HostCommand =
@@ -47,6 +48,10 @@ export type HostCommand =
   | { kind: "dealNext" }  // manual deal when auto-deal is waiting (e.g. after rebuys)
   | { kind: "addChips"; playerId: string; amount: number } // rebuy approval (3.4)
   | { kind: "sitOut"; playerId: string; out: boolean }     // (6.x)
+  // Admin resolves a spectator's seat request (item 2). accept/edit-stack seat
+  // them with `stack` (a fresh buy-in); reject drops it; ignore keeps it for the
+  // next game on this table (item 4).
+  | { kind: "seatRequest"; playerId: string; action: "accept" | "reject" | "ignore"; stack?: number }
   | { kind: "end" };      // finalize session + ledger (7.3)
 
 export interface StartingPlayer {

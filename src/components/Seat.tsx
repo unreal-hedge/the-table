@@ -13,11 +13,28 @@ interface Props {
   offline?: boolean;             // online: no live connection (grace running)
   bubble?: string | null;        // recent chat line, floats above the seat
   backCount?: number;            // hidden-card count for opponents (2 NLHE, 6 DFT)
+  canRequest?: boolean;          // spectator may tap this empty seat to request it (item 2)
+  onRequestSeat?: () => void;
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, backCount = 2, onPeek, winBadge }: Props) {
+export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, backCount = 2, canRequest = false, onRequestSeat, onPeek, winBadge }: Props) {
+  // Empty numbered slot (item 2): a spectator can tap it to ask for the seat.
+  if (v.empty) {
+    return (
+      <div
+        className={`seat empty${canRequest ? " requestable" : ""}`}
+        style={{ left: `${x}%`, top: `${y}%` }}
+        onClick={canRequest ? onRequestSeat : undefined}
+      >
+        <div className="empty-plate">
+          <div className="seat-num">Seat {v.seat + 1}</div>
+          {canRequest && <div className="sit-hint">tap to sit</div>}
+        </div>
+      </div>
+    );
+  }
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";

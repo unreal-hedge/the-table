@@ -14,6 +14,7 @@ import {
   PlayerRecord, Phase, SeatView, SessionSummary, BettingRound,
 } from "./types";
 import { handName } from "./handNames";
+import { emptySeatView } from "./util";
 
 const MAX_SEATS = 8; // Parth 2.1
 
@@ -144,6 +145,29 @@ export class GameManager {
     p.pendingAddChips += add;
     this.pushLog(`${p.name} approved for +${fmt(add)} chips (next hand)`);
     if (this.phase === "handEnded" || this.phase === "lobby") this.applyPendingChips();
+  }
+
+  /** Seat a spectator (busted, re-buying) or a brand-new player at an empty seat
+   *  with a fresh buy-in. Between hands only (the server gates emptiness/timing). */
+  seatPlayer(id: string, name: string, seat: number, stack: number) {
+    if (this.phase === "inHand" || this.phase === "paused") return;
+    const amount = clamp(stack, this.config.minBuyIn, this.config.maxBuyIn);
+    const existing = this.players.get(id);
+    if (existing) {
+      existing.seat = seat;
+      existing.stack = amount;
+      existing.buyInTotal += amount; // a fresh buy-in adds to the ledger
+      existing.spectating = false;
+      existing.sittingOut = false;
+      existing.consecutiveTimeouts = 0;
+    } else {
+      this.players.set(id, {
+        id, name, seat, stack: amount, buyInTotal: amount,
+        sittingOut: false, consecutiveTimeouts: 0,
+        timeBank: this.config.timeBankSec, pendingAddChips: 0, spectating: false,
+      });
+    }
+    this.pushLog(`${name} takes seat ${seat + 1} with ${fmt(amount)}`);
   }
 
   /** Fold-win only: the winner may voluntarily show (9.1). */
@@ -362,27 +386,30 @@ export class GameManager {
       ? this.table.playerToAct() : null;
     const legal = toAct != null ? this.table.legalActions() : null;
 
-    const seats: SeatView[] = [...this.players.values()]
-      .filter((p) => !p.spectating) // busted players are spectators, not seated
-      .sort((a, b) => a.seat - b.seat)
-      .map((p) => {
-        const ts = tableSeats[p.seat] ?? null;
-        const dealtIn = inHand && this.wasDealtIn(p.seat);
-        return {
-          seat: p.seat, id: p.id, name: p.name,
-          stack: ts && dealtIn ? ts.stack : p.stack,
-          betSize: ts && dealtIn ? ts.betSize : 0,
-          inHand: dealtIn && !this.foldedSeats.has(p.seat),
-          folded: this.foldedSeats.has(p.seat),
-          sittingOut: p.sittingOut,
-          isButton: inHand ? this.table.button() === p.seat : this.lastButton === p.seat,
-          isTurn: toAct === p.seat,
-          holeCards: this.holeSnapshot[p.seat] ?? null,
-          revealed: this.revealedSeats.has(p.seat),
-          lastAction: this.lastActionBySeat.get(p.seat) ?? null,
-          timeBank: p.timeBank,
-        };
+    // Fixed 8-seat grid: every index 0..7 is a slot — occupied or empty (item 2).
+    const occupied = new Map<number, PlayerRecord>();
+    for (const p of this.players.values()) if (!p.spectating) occupied.set(p.seat, p);
+    const seats: SeatView[] = [];
+    for (let i = 0; i < MAX_SEATS; i++) {
+      const p = occupied.get(i);
+      if (!p) { seats.push(emptySeatView(i)); continue; }
+      const ts = tableSeats[p.seat] ?? null;
+      const dealtIn = inHand && this.wasDealtIn(p.seat);
+      seats.push({
+        seat: p.seat, id: p.id, name: p.name,
+        stack: ts && dealtIn ? ts.stack : p.stack,
+        betSize: ts && dealtIn ? ts.betSize : 0,
+        inHand: dealtIn && !this.foldedSeats.has(p.seat),
+        folded: this.foldedSeats.has(p.seat),
+        sittingOut: p.sittingOut,
+        isButton: inHand ? this.table.button() === p.seat : this.lastButton === p.seat,
+        isTurn: toAct === p.seat,
+        holeCards: this.holeSnapshot[p.seat] ?? null,
+        revealed: this.revealedSeats.has(p.seat),
+        lastAction: this.lastActionBySeat.get(p.seat) ?? null,
+        timeBank: p.timeBank,
       });
+    }
 
     const pots = inHand && this.table.isHandInProgress()
       ? (this.table.pots() as { size: number; eligiblePlayers: number[] }[])

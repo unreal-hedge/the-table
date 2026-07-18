@@ -49,9 +49,11 @@ export interface PlayerRecord {
                            // rebuy/re-seat clears it. Absent === seated.
 }
 
-/** What the UI needs to draw one seat. */
+/** What the UI needs to draw one seat. An EMPTY seat (empty:true) is a numbered
+ *  slot with no player — a spectator may tap it to request it (item 2). */
 export interface SeatView {
   seat: number;
+  empty?: boolean;          // numbered but unoccupied — id/name are "" then
   id: string;
   name: string;
   stack: number;
@@ -172,7 +174,18 @@ export interface GameState {
   canShowSeat: number | null;       // fold-win: this seat may voluntarily show (9.1)
   waitingReason: string | null;     // why the table can't deal ("Waiting for at
                                     // least 2 players with chips") — else null
+  seatRequests?: SeatRequestView[]; // spectators asking for an empty seat (item 2);
+                                    // server-injected, admins act on them
   dft?: DftView;                    // present iff variant === "dft"
+}
+
+/** A spectator's pending request to take an empty seat (item 2). Public (not a
+ *  secret); either admin resolves it (accept / reject / ignore / edit-stack). */
+export interface SeatRequestView {
+  playerId: string;
+  name: string;
+  seat: number;      // the empty seat they tapped
+  ignored: boolean;  // admin chose "ignore" — persists to the next game (item 4)
 }
 
 /** Ledger rows (3.6). */

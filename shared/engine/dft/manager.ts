@@ -16,7 +16,7 @@ import type {
   LedgerRow, Phase, PlayerAction, PlayerRecord, SeatView, SessionSummary,
 } from "../types";
 import type { TableEngine } from "../table-engine";
-import { nextButtonSeat, clamp, ledgerRows, fmt } from "../util";
+import { nextButtonSeat, clamp, ledgerRows, fmt, emptySeatView } from "../util";
 import { Deck, makeRng } from "./deck";
 import { DftBetting, type BetActionType, type LegalBet } from "./betting";
 import {
@@ -237,6 +237,29 @@ export class DoubleFlopManager implements TableEngine {
     if (this.phaseVal === "handEnded" || this.phaseVal === "lobby") this.applyPendingChips();
   }
 
+  /** Seat a spectator (busted, re-buying) or a brand-new player at an empty seat
+   *  with a fresh buy-in. Between hands only (the server gates emptiness/timing). */
+  seatPlayer(id: string, name: string, seat: number, stack: number): void {
+    if (this.handInProgress()) return;
+    const amount = clamp(stack, this.config.minBuyIn, this.config.maxBuyIn);
+    const existing = this.players.get(id);
+    if (existing) {
+      existing.seat = seat;
+      existing.stack = amount;
+      existing.buyInTotal += amount; // a fresh buy-in adds to the ledger
+      existing.spectating = false;
+      existing.sittingOut = false;
+      existing.consecutiveTimeouts = 0;
+    } else {
+      this.players.set(id, {
+        id, name, seat, stack: amount, buyInTotal: amount,
+        sittingOut: false, consecutiveTimeouts: 0, timeBank: this.config.timeBankSec,
+        pendingAddChips: 0, spectating: false,
+      });
+    }
+    this.pushLog(`${name} takes seat ${seat + 1} with ${fmt(amount)}`);
+  }
+
   private applyPendingChips(): void {
     for (const p of this.players.values()) {
       if (p.pendingAddChips > 0) {
@@ -454,37 +477,38 @@ export class DoubleFlopManager implements TableEngine {
       ? { a: bf.a.slice(0, revealCount), b: bf.b.slice(0, revealCount) }
       : { a: [], b: [] };
 
-    const seats: SeatView[] = [...this.players.values()]
-      .filter((p) => !p.spectating) // busted players are spectators, not seated
-      .sort((x, y) => x.seat - y.seat)
-      .map((p): SeatView => {
-        const inHandNow = live && dealtIn.has(p.seat);
-        const folded = inHandNow ? b!.isFolded(p.seat) : false;
-        const isShowdownSeat = this.showdownSeats.includes(p.seat);
-        const decls: { potIndex: number; decision: DftDecision }[] = [];
-        for (const [key, d] of this.decisions) {
-          const [pi, s] = key.split(":").map(Number);
-          if (s === p.seat) decls.push({ potIndex: pi, decision: d });
-        }
-        return {
-          seat: p.seat,
-          id: p.id,
-          name: p.name,
-          stack: inHandNow ? b!.stackOf(p.seat) : p.stack,
-          betSize: this.phaseVal === "betting" && dealtIn.has(p.seat) ? b!.roundBetOf(p.seat) : 0,
-          inHand: inHandNow && !folded,
-          folded,
-          sittingOut: p.sittingOut,
-          isButton: live ? this.lastButton === p.seat : false,
-          isTurn: actor === p.seat,
-          holeCards: inHandNow ? (this.dealt!.hole.get(p.seat) ?? null) : null,
-          revealed: cardsRevealed && isShowdownSeat && !folded,
-          lastAction: null, // DFT betting-action badges: deferred to the UI step
-          timeBank: p.timeBank,
-          arrangement: inHandNow && isShowdownSeat ? (this.arrangementOrder.get(p.seat) ?? null) : null,
-          declarations: decls.length ? decls : undefined,
-        };
+    // Fixed 7-seat grid: every index 0..6 is a slot — occupied or empty (item 2).
+    const occupied = new Map<number, PlayerRecord>();
+    for (const p of this.players.values()) if (!p.spectating) occupied.set(p.seat, p);
+    const seats: SeatView[] = [];
+    for (let i = 0; i < MAX_DFT_SEATS; i++) {
+      const p = occupied.get(i);
+      if (!p) { seats.push(emptySeatView(i)); continue; }
+      const inHandNow = live && dealtIn.has(p.seat);
+      const folded = inHandNow ? b!.isFolded(p.seat) : false;
+      const isShowdownSeat = this.showdownSeats.includes(p.seat);
+      const decls: { potIndex: number; decision: DftDecision }[] = [];
+      for (const [key, d] of this.decisions) {
+        const [pi, sSeat] = key.split(":").map(Number);
+        if (sSeat === p.seat) decls.push({ potIndex: pi, decision: d });
+      }
+      seats.push({
+        seat: p.seat, id: p.id, name: p.name,
+        stack: inHandNow ? b!.stackOf(p.seat) : p.stack,
+        betSize: this.phaseVal === "betting" && dealtIn.has(p.seat) ? b!.roundBetOf(p.seat) : 0,
+        inHand: inHandNow && !folded,
+        folded,
+        sittingOut: p.sittingOut,
+        isButton: live ? this.lastButton === p.seat : false,
+        isTurn: actor === p.seat,
+        holeCards: inHandNow ? (this.dealt!.hole.get(p.seat) ?? null) : null,
+        revealed: cardsRevealed && isShowdownSeat && !folded,
+        lastAction: null, // DFT betting-action badges: deferred to the UI step
+        timeBank: p.timeBank,
+        arrangement: inHandNow && isShowdownSeat ? (this.arrangementOrder.get(p.seat) ?? null) : null,
+        declarations: decls.length ? decls : undefined,
       });
+    }
 
     const legal = this.phaseVal === "betting" ? b!.legal() : null;
     const canBetOrRaise = !!legal && legal.actions.some((a) => a === "bet" || a === "raise");

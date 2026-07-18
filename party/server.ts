@@ -108,6 +108,9 @@ export class TableServer extends Server<Env> {
    *  life); the only hole is re-entering short after an end→start in
    *  the same room, and this map closes it. */
   private exitStacks = new Map<string, number>();
+  /** Spectators asking for an empty seat (item 2): playerId → request. Persists
+   *  across a session end→start so an "ignore" carries to the next game (item 4). */
+  private seatRequests = new Map<string, { seat: number; ignored: boolean }>();
 
   // ---------- connection lifecycle ----------
 
@@ -176,6 +179,7 @@ export class TableServer extends Server<Env> {
       case "chat":              return this.handleChat(conn, playerId, msg.text);
       case "submitArrangement": return this.handleSubmitArrangement(conn, playerId, msg.order);
       case "declare":           return this.handleDeclare(conn, playerId, msg.potIndex, msg.decision);
+      case "requestSeat":       return this.handleRequestSeat(conn, playerId, msg.seat);
       case "host":              return this.handleHost(conn, playerId, msg.cmd);
       default:                  return this.error(conn, "Unknown message type");
     }
@@ -337,6 +341,20 @@ export class TableServer extends Server<Env> {
     this.afterMutation();
   }
 
+  /** A spectator (not currently seated) asks for an empty numbered seat. Stored
+   *  and surfaced to BOTH admins, who resolve it. The seat must actually be
+   *  empty; the requester must not already be seated. */
+  private handleRequestSeat(conn: Connection, playerId: string, seat: number) {
+    if (!this.gm) return this.error(conn, "No game running");
+    if (this.seatOf(playerId) != null) return this.error(conn, "You're already seated");
+    if (!Number.isInteger(seat) || seat < 0) return this.error(conn, "Bad seat");
+    const slot = this.gm.state().seats[seat];
+    if (!slot || !slot.empty) return this.error(conn, "That seat isn't empty");
+    this.seatRequests.set(playerId, { seat, ignored: false });
+    this.pushLogQuiet(`${playerId} requested seat ${seat + 1}`);
+    this.afterMutation();
+  }
+
   private handleChat(conn: Connection, playerId: string, text: string) {
     const clean = String(text ?? "").trim().slice(0, CHAT_MAX_LENGTH);
     if (!clean) return;
@@ -458,6 +476,32 @@ export class TableServer extends Server<Env> {
       }
       case "addChips": this.gm?.approveAddChips(cmd.playerId, cmd.amount); break;
       case "sitOut":   this.gm?.toggleSitOut(cmd.playerId, cmd.out); break;
+      case "seatRequest": {
+        if (!this.gm) return this.error(conn, "No game running");
+        const req = this.seatRequests.get(cmd.playerId);
+        if (!req) return this.error(conn, "No such seat request");
+        if (cmd.action === "reject") {
+          this.seatRequests.delete(cmd.playerId);
+        } else if (cmd.action === "ignore") {
+          req.ignored = true; // persists to the next game on this table (item 4)
+        } else {
+          // accept / edit-stack: seat them between hands with a fresh buy-in
+          const phase = this.gm.state().phase;
+          if (phase === "inHand" || phase === "paused") {
+            return this.error(conn, "Can only seat a player between hands");
+          }
+          const slot = this.gm.state().seats[req.seat];
+          if (!slot || !slot.empty) {
+            this.seatRequests.delete(cmd.playerId);
+            return this.error(conn, "That seat filled up");
+          }
+          const stack = typeof cmd.stack === "number" && cmd.stack > 0
+            ? cmd.stack : (this.config?.defaultBuyIn ?? 1000);
+          this.gm.seatPlayer(cmd.playerId, this.nameOf(cmd.playerId), req.seat, stack);
+          this.seatRequests.delete(cmd.playerId);
+        }
+        break;
+      }
       case "end": {
         if (!this.gm) return this.error(conn, "No game running");
         for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);
@@ -598,6 +642,11 @@ export class TableServer extends Server<Env> {
       s = { ...s, phase: "paused", playerToAct: null, legalActions: null };
     }
     if (this.systemLog.length) s = { ...s, log: [...s.log, ...this.systemLog] };
+    if (this.seatRequests.size > 0) {
+      s = { ...s, seatRequests: [...this.seatRequests.entries()].map(([playerId, r]) => ({
+        playerId, name: this.nameOf(playerId), seat: r.seat, ignored: r.ignored,
+      })) };
+    }
     return s;
   }
 

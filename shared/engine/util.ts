@@ -5,7 +5,7 @@
 // work — see ROADMAP. We do NOT touch GameManager this phase.)
 // ============================================================
 
-import type { LedgerRow, PlayerRecord } from "./types";
+import type { LedgerRow, PlayerRecord, SeatView } from "./types";
 
 export function fmt(n: number): string {
   return n.toLocaleString("en-IN");
@@ -19,6 +19,16 @@ export function clamp(n: number, lo: number, hi: number): number {
 export function nextButtonSeat(activeSeats: number[], lastButton: number): number {
   const sorted = [...activeSeats].sort((a, b) => a - b);
   return sorted.find((s) => s > lastButton) ?? sorted[0];
+}
+
+/** A numbered but unoccupied seat, for the fixed seat grid (item 2). Both
+ *  engines emit MAX_SEATS/MAX_DFT_SEATS slots; empty ones use this. */
+export function emptySeatView(seat: number): SeatView {
+  return {
+    seat, empty: true, id: "", name: "", stack: 0, betSize: 0,
+    inHand: false, folded: false, sittingOut: false, isButton: false,
+    isTurn: false, holeCards: null, revealed: false, lastAction: null, timeBank: 0,
+  };
 }
 
 /** Ledger rows from player records (net = stack - total bought in). */

@@ -347,6 +347,33 @@ input { font: inherit; color: var(--text); }
   animation: connPulse 1.2s ease infinite;
 }
 .plate .stack { font-family: var(--font-mono), monospace; font-size: 13px; color: var(--gold); }
+
+/* Empty numbered seat + spectator "tap to sit" (item 2). */
+.seat.empty .empty-plate {
+  border: 1px dashed var(--line); border-radius: 10px; padding: 12px 8px;
+  color: var(--muted); background: rgba(255, 255, 255, 0.02);
+}
+.seat.empty .seat-num { font-size: 12px; letter-spacing: 0.06em; }
+.seat.empty .sit-hint { font-size: 11px; color: var(--gold); margin-top: 3px; }
+.seat.empty.requestable { cursor: pointer; }
+.seat.empty.requestable .empty-plate { border-color: rgba(217, 164, 65, 0.5); }
+.seat.empty.requestable:hover .empty-plate { border-color: var(--gold); background: rgba(217, 164, 65, 0.08); }
+
+/* Admin seat-request queue (item 2). */
+.seat-requests {
+  position: absolute; left: 16px; bottom: 16px; z-index: 20; max-width: 340px;
+  background: rgba(10, 14, 12, 0.92); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; font-size: 13px;
+}
+.seat-requests .sr-title { font-weight: 700; margin-bottom: 8px; color: var(--gold); }
+.seat-requests .sr-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.seat-requests .sr-name { color: var(--text); }
+.seat-requests .sr-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.seat-requests .sr-btns button {
+  font-size: 12px; padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer;
+}
+.seat-requests .sr-btns button:hover { border-color: var(--gold); }
 .timer-track { height: 3px; border-radius: 2px; background: rgba(242, 236, 221, 0.12);
   margin-top: 6px; overflow: hidden; }
 .timer-fill { height: 100%; background: var(--glow); border-radius: 2px;
