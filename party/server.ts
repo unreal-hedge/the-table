@@ -198,15 +198,17 @@ export class TableServer extends Server<Env> {
       return this.error(conn, INVALID_LOGIN);
     }
 
-    if (this.roster.size === 0) {
-      // fresh room — the first join claims it (seeds the roster so people can
-      // log in). Host power is identity-based (ADMIN_IDS), NOT granted by
-      // claiming the room.
-      this.roster.set(id, { name: id, keyword: kw });
-      this.pushLogQuiet(`room claimed by ${id}`);
+    // Login model (item 5): pick your character + keyword. A character NEW to
+    // this room self-registers its keyword; a returning one must match it. This
+    // lets anyone — including an admin — join a room they weren't pre-rostered
+    // in (closes the item-6 deferral) and powers the join→spectate→seat-request
+    // flow. Keywords are placeholders for now (individualised later).
+    const entry = this.roster.get(id);
+    if (entry) {
+      if (entry.keyword !== kw) return this.error(conn, INVALID_LOGIN);
     } else {
-      const entry = this.roster.get(id);
-      if (!entry || entry.keyword !== kw) return this.error(conn, INVALID_LOGIN);
+      this.roster.set(id, { name: id, keyword: kw });
+      this.pushLogQuiet(`${id} joined + self-registered`);
     }
 
     // Takeover (spec 8.2): a correct login always wins the seat. Any

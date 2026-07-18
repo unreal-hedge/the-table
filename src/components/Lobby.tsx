@@ -6,7 +6,7 @@
 // from localStorage until it moves to Supabase in phase 1b.2.
 
 import { useEffect, useState } from "react";
-import { GameConfig, SessionSummary } from "@/engine/types";
+import { DEFAULT_CONFIG, GameConfig, SessionSummary, Variant } from "@/engine/types";
 import { fmt } from "@/engine/manager";
 import { GameSetupForm, SetupPlayer } from "./GameSetupForm";
 
@@ -24,13 +24,20 @@ interface Props {
   devLocal: boolean;
   onStartLocal: (config: GameConfig, players: SetupPlayer[]) => void;
   onJoinOnline: (room: string, myId: string, keyword: string) => void;
+  onCreateOnline: (room: string, myId: string, keyword: string, config: GameConfig, mode: Variant) => void;
 }
 
-export function Lobby({ devLocal, onStartLocal, onJoinOnline }: Props) {
+export function Lobby({ devLocal, onStartLocal, onJoinOnline, onCreateOnline }: Props) {
   const [tab, setTab] = useState<"local" | "online">("online");
+  const [entry, setEntry] = useState<"create" | "join">("join"); // item 5: two paths
   const [room, setRoom] = useState("");
   const [name, setName] = useState("");
   const [keyword, setKeyword] = useState("");
+  // CREATE-only config
+  const [mode, setMode] = useState<Variant>("nlhe");
+  const [sb, setSb] = useState(100);
+  const [bb, setBb] = useState(200);
+  const [stack, setStack] = useState(2000);
   const [overall, setOverall] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -40,14 +47,19 @@ export function Lobby({ devLocal, onStartLocal, onJoinOnline }: Props) {
     setOverall(totals);
   }, []);
 
-  const joinValid =
-    room.trim().length >= 2 && name.trim().length >= 2 && keyword.trim().length >= 2;
-  const join = () =>
-    onJoinOnline(
-      room.trim().toLowerCase(),
-      name.trim().toLowerCase(),
-      keyword.trim().toLowerCase()
-    );
+  const idsValid = room.trim().length >= 2 && name.trim().length >= 2 && keyword.trim().length >= 2;
+  const joinValid = idsValid;
+  const createValid = idsValid && sb > 0 && bb > 0 && stack > 0;
+  const norm = () => [room.trim().toLowerCase(), name.trim().toLowerCase(), keyword.trim().toLowerCase()] as const;
+  const join = () => { const [r, n, k] = norm(); onJoinOnline(r, n, k); };
+  const create = () => {
+    const [r, n, k] = norm();
+    const config: GameConfig = {
+      ...DEFAULT_CONFIG, smallBlind: sb, bigBlind: bb, defaultBuyIn: stack,
+      minBuyIn: Math.min(DEFAULT_CONFIG.minBuyIn, stack), maxBuyIn: Math.max(DEFAULT_CONFIG.maxBuyIn, stack),
+    };
+    onCreateOnline(r, n, k, config, mode);
+  };
 
   return (
     <div className="lobby">
@@ -75,28 +87,63 @@ export function Lobby({ devLocal, onStartLocal, onJoinOnline }: Props) {
             onSubmit={onStartLocal} />
         ) : (
           <>
-            <h2>Join a room</h2>
+            <div className="mode-tabs" role="tablist">
+              <button role="tab" aria-selected={entry === "create"}
+                className={`mode-tab${entry === "create" ? " active" : ""}`}
+                onClick={() => setEntry("create")}>Create game</button>
+              <button role="tab" aria-selected={entry === "join"}
+                className={`mode-tab${entry === "join" ? " active" : ""}`}
+                onClick={() => setEntry("join")}>Join game</button>
+            </div>
+
             <div className="field-row">
-              <div className="field"><label>Room name</label>
-                <input type="text" placeholder="friday-night" value={room}
-                  onChange={(e) => setRoom(e.target.value)} /></div>
-              <div className="field"><label>Your name</label>
+              <div className="field"><label>Your character</label>
                 <input type="text" placeholder="kabir" value={name}
                   onChange={(e) => setName(e.target.value)} /></div>
+              <div className="field"><label>Table name</label>
+                <input type="text" placeholder="friday-night" value={room}
+                  onChange={(e) => setRoom(e.target.value)} /></div>
               <div className="field"><label>Keyword</label>
                 <input type="password" placeholder="secret word" value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && joinValid) join(); }} /></div>
+                  onKeyDown={(e) => { if (e.key === "Enter") { if (entry === "join" && joinValid) join(); else if (entry === "create" && createValid) create(); } }} /></div>
             </div>
-            <p className="form-hint">
-              First person into a fresh room claims it — their keyword is set by
-              this login. Everyone else needs the name + keyword the host
-              configured. Parth and Kabir are always the admins. Logging in from
-              a new device takes your seat with you.
-            </p>
-            <button className="primary-btn" disabled={!joinValid} onClick={join}>
-              Join room
-            </button>
+
+            {entry === "create" ? (
+              <>
+                <h3>Game mode</h3>
+                <div className="mode-tabs" role="tablist">
+                  <button role="tab" aria-selected={mode === "nlhe"}
+                    className={`mode-tab${mode === "nlhe" ? " active" : ""}`}
+                    onClick={() => setMode("nlhe")}>No-Limit Hold&apos;em</button>
+                  <button role="tab" aria-selected={mode === "dft"}
+                    className={`mode-tab${mode === "dft" ? " active" : ""}`}
+                    onClick={() => setMode("dft")}>Double Flop Tex</button>
+                </div>
+                <div className="field-row">
+                  <div className="field"><label>Small blind</label>
+                    <input type="number" value={sb} onChange={(e) => setSb(Math.max(0, Number(e.target.value) || 0))} /></div>
+                  <div className="field"><label>Big blind</label>
+                    <input type="number" value={bb} onChange={(e) => setBb(Math.max(0, Number(e.target.value) || 0))} /></div>
+                  <div className="field"><label>Starting stack</label>
+                    <input type="number" value={stack} onChange={(e) => setStack(Math.max(0, Number(e.target.value) || 0))} /></div>
+                </div>
+                <p className="form-hint">
+                  You set the table up and take a seat first. Everyone else joins by
+                  character + keyword and taps an empty seat — you approve them. Only
+                  Parth &amp; Kabir can create a game.
+                </p>
+                <button className="primary-btn" disabled={!createValid} onClick={create}>Create game</button>
+              </>
+            ) : (
+              <>
+                <p className="form-hint">
+                  Pick your character, the table name, and your keyword — nothing else.
+                  If the table is full you&apos;ll spectate and can tap an empty seat to ask in.
+                </p>
+                <button className="primary-btn" disabled={!joinValid} onClick={join}>Join game</button>
+              </>
+            )}
           </>
         )}
 

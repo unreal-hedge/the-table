@@ -4,7 +4,7 @@
 // Players only get the online flow; hot-seat is dev-only (/?dev=local).
 
 import { useEffect, useState } from "react";
-import { GameConfig } from "@/engine/types";
+import { GameConfig, Variant } from "@/engine/types";
 import { Lobby } from "@/components/Lobby";
 import { SetupPlayer } from "@/components/GameSetupForm";
 import { LocalGame } from "@/components/LocalGame";
@@ -13,7 +13,7 @@ import { OnlineGame } from "@/components/OnlineGame";
 type Screen =
   | { kind: "lobby" }
   | { kind: "local"; config: GameConfig; players: SetupPlayer[] }
-  | { kind: "online"; room: string; myId: string; keyword: string };
+  | { kind: "online"; room: string; myId: string; keyword: string; create?: { config: GameConfig; mode: Variant } };
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>({ kind: "lobby" });
@@ -32,7 +32,7 @@ export default function Home() {
     case "online":
       return (
         <OnlineGame room={screen.room} myId={screen.myId} keyword={screen.keyword}
-          onExit={toLobby} />
+          create={screen.create} onExit={toLobby} />
       );
     default:
       return (
@@ -40,6 +40,8 @@ export default function Home() {
           devLocal={devLocal}
           onStartLocal={(config, players) => setScreen({ kind: "local", config, players })}
           onJoinOnline={(room, myId, keyword) => setScreen({ kind: "online", room, myId, keyword })}
+          onCreateOnline={(room, myId, keyword, config, mode) =>
+            setScreen({ kind: "online", room, myId, keyword, create: { config, mode } })}
         />
       );
   }

@@ -10,7 +10,8 @@
 //  - a dropped connection shows a full veil — never a silent freeze
 // ============================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { GameConfig, Variant } from "@/engine/types";
 import { useRoom, ConnectionStatus } from "@/hooks/use-room";
 import { GameSetupForm } from "./GameSetupForm";
 import { TableView } from "./TableView";
@@ -20,6 +21,8 @@ interface Props {
   room: string;
   myId: string;
   keyword: string;
+  /** set only when this player arrived via CREATE GAME — auto-starts once (item 5) */
+  create?: { config: GameConfig; mode: Variant };
   onExit: () => void;
 }
 
@@ -41,7 +44,7 @@ function ConnPill({ status }: { status: ConnectionStatus }) {
   );
 }
 
-export function OnlineGame({ room, myId, keyword, onExit }: Props) {
+export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
   const r = useRoom(room, myId, keyword);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
   const isHost = r.isHost; // server-confirmed via the roster, never guessed
@@ -49,6 +52,24 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
   // Each new session summary (a stop OR a restart) shows its own EndScreen — so
   // a restart's settled ledger surfaces and a later stop is never swallowed.
   useEffect(() => { if (r.summary) setSummaryDismissed(false); }, [r.summary]);
+
+  // CREATE GAME path (item 5): the creator set up the table in the lobby, so we
+  // auto-start once — table name, mode, blinds and their own seat — instead of
+  // dropping them onto the host setup form. Guarded so it fires exactly once,
+  // only after the server has confirmed us as an admin and connected.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !create) return;
+    if (!isHost || r.status !== "connected" || r.state != null) return;
+    autoStarted.current = true;
+    setSummaryDismissed(false);
+    r.send.host({
+      kind: "start",
+      gameMode: create.mode,
+      config: create.config,
+      players: [{ id: myId, name: myId, buyIn: create.config.defaultBuyIn, keyword }],
+    });
+  }, [create, isHost, r.status, r.state, r.send, myId, keyword]);
   const memberNames = r.members.map((m) => m.name).join(", ") || "just you";
 
   // ----- kicked: another device took this seat (spec 8.2) -----
