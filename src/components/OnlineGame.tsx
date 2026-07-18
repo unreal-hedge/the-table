@@ -10,7 +10,7 @@
 //  - a dropped connection shows a full veil — never a silent freeze
 // ============================================================
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRoom, ConnectionStatus } from "@/hooks/use-room";
 import { GameSetupForm } from "./GameSetupForm";
 import { TableView } from "./TableView";
@@ -45,6 +45,10 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
   const r = useRoom(room, myId, keyword);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
   const isHost = r.isHost; // server-confirmed via the roster, never guessed
+
+  // Each new session summary (a stop OR a restart) shows its own EndScreen — so
+  // a restart's settled ledger surfaces and a later stop is never swallowed.
+  useEffect(() => { if (r.summary) setSummaryDismissed(false); }, [r.summary]);
   const memberNames = r.members.map((m) => m.name).join(", ") || "just you";
 
   // ----- kicked: another device took this seat (spec 8.2) -----
@@ -168,6 +172,8 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
       onSeatRequest={isHost ? (playerId, action, stack) => r.send.host({ kind: "seatRequest", playerId, action, stack }) : undefined}
       onRequestChips={(amount) => r.send.requestChips(amount)}
       onChipRequest={isHost ? (playerId, action, amount) => r.send.host({ kind: "chipRequest", playerId, action, amount }) : undefined}
+      onDealNext={isHost ? () => r.send.host({ kind: "dealNext" }) : undefined}
+      onRestart={isHost ? () => r.send.host({ kind: "restart" }) : undefined}
     />
   );
 }

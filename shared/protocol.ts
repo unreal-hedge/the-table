@@ -56,6 +56,10 @@ export type HostCommand =
   // Admin resolves a seated player's rebuy request (item 3). approve applies
   // `amount` (or the requested amount) between hands; reject drops it.
   | { kind: "chipRequest"; playerId: string; action: "approve" | "reject"; amount?: number }
+  // Stop the current session (settle its ledger) AND immediately start a fresh
+  // one on the same table — same seated players, fresh default buy-ins, carried
+  // ignored seat requests — with nobody re-entering the room or keyword (item 4).
+  | { kind: "restart" }
   | { kind: "end" };      // finalize session + ledger (7.3)
 
 export interface StartingPlayer {

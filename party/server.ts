@@ -526,6 +526,40 @@ export class TableServer extends Server<Env> {
         this.chipRequests.delete(cmd.playerId);
         break;
       }
+      case "restart": {
+        if (!this.gm) return this.error(conn, "No game running");
+        if (!this.config) return this.error(conn, "No running config");
+        // capture the currently-seated crew BEFORE stopping
+        const seated: StartingPlayer[] = this.gm.state().seats
+          .filter((s) => !s.empty)
+          .map((s) => ({ id: s.id, name: s.name, buyIn: this.config!.defaultBuyIn, keyword: this.roster.get(s.id)?.keyword ?? "" }));
+        // settle + record the OLD session's ledger (rathole floor + overall tally)
+        for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);
+        const summary = this.gm.stop();
+        for (const row of summary.rows) this.exitStacks.set(row.id, row.stack);
+        this.broadcastMsg({ type: "ended", summary });
+        // fresh session on the SAME table: keep only IGNORED seat requests (item 4)
+        this.chipRequests.clear();
+        for (const [id, r] of [...this.seatRequests]) if (!r.ignored) this.seatRequests.delete(id);
+        this.dftPaused = false;
+        this.pendingVariant = null;
+        this.systemLog = [];
+        try {
+          this.gm = this.makeEngine(this.variant, this.config, seated);
+          this.gm.start();
+        } catch (e) {
+          console.error(`[TableServer] restart failed:`, e);
+          this.gm = null;
+          return this.error(conn, "Could not restart the game");
+        }
+        // seats may have re-indexed — refresh everyone's "you"
+        for (const c of this.getConnections()) {
+          const pid = this.joined.get(c.id);
+          if (pid === undefined) continue;
+          this.send(c, { type: "you", playerId: pid, seat: this.seatOf(pid), host: this.isAdmin(pid) });
+        }
+        break;
+      }
       case "end": {
         if (!this.gm) return this.error(conn, "No game running");
         for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);

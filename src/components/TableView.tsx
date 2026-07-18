@@ -60,6 +60,8 @@ interface Props {
   onSeatRequest?: (playerId: string, action: "accept" | "reject" | "ignore", stack?: number) => void; // admin resolves it
   onRequestChips?: (amount: number) => void;                                              // seated player asks for a rebuy (item 3)
   onChipRequest?: (playerId: string, action: "approve" | "reject", amount?: number) => void; // admin resolves it
+  onDealNext?: () => void;   // admin advances a parked handEnded table (item 4)
+  onRestart?: () => void;    // admin stops + starts a fresh session, same crew (item 4)
 }
 
 export function TableView({
@@ -67,7 +69,7 @@ export function TableView({
   connectedIds, chat, myId, onChat, corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
   onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
-  onRequestSeat, onSeatRequest, onRequestChips, onChipRequest,
+  onRequestSeat, onSeatRequest, onRequestChips, onChipRequest, onDealNext, onRestart,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
@@ -149,6 +151,14 @@ export function TableView({
           <button onClick={() => onSetMode(s.variant === "dft" ? "nlhe" : "dft")}>
             {s.variant === "dft" ? "Switch to Hold'em" : "Switch to Double Flop"}
           </button>
+        )}
+        {isHost && onDealNext && s.phase === "handEnded" && (
+          <button onClick={onDealNext}>Deal next hand</button>
+        )}
+        {isHost && onRestart && (
+          <button onClick={() => {
+            if (window.confirm("Restart? Settles the current session and deals a fresh game with the same seated players.")) onRestart();
+          }}>Restart game</button>
         )}
         {isHost && onEnd && <button onClick={onEnd}>End session</button>}
       </div>
