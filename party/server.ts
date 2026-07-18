@@ -12,9 +12,9 @@
 //  - Every "act" is verified server-side: connection → playerId →
 //    seat must equal the engine's playerToAct. The client's word
 //    is never trusted.
-//  - "host" commands are only accepted from connections joined as
-//    a host id. PROVISIONAL until Step 5 keyword login — see the
-//    warning atop ROADMAP.md.
+//  - "host" commands are only accepted from the two PERMANENT admins,
+//    by character identity (ADMIN_IDS) — never from who created the room
+//    or joined first. Both admins hold every host power, independently.
 //  - The 30s clock/time bank is still client-display only; the
 //    server takes ownership of it in Step 6.
 //
@@ -57,6 +57,12 @@ const CLOCK_GRACE_MS = 750;
 // sits them out (spec 8.2). Overridable per session for tests.
 const DEFAULT_DISCONNECT_GRACE_MS = 120_000;
 
+// The two PERMANENT admins, by character identity. Host/admin power is derived
+// from WHO you are — whoever is logged in as Parth and whoever is logged in as
+// Kabir — never from who created the room or joined first. Both hold every host
+// power independently, simultaneously, always. Nobody else ever gets it.
+const ADMIN_IDS = new Set(["parth", "kabir"]);
+
 export class TableServer extends Server<Env> {
   // NOT hibernatable: the GameManager (deck, hidden cards, clocks)
   // lives in memory, and hibernation would wipe it mid-session. A
@@ -83,11 +89,11 @@ export class TableServer extends Server<Env> {
   /** connection.id → playerId. THE identity map — every permission
    *  check goes through this, never through fields in the message. */
   private joined = new Map<string, string>();
-  /** The room's login book: playerId → credentials + host flag.
-   *  Bootstrap: first join in a fresh room claims it (creator = host);
-   *  afterwards only the host's start form adds/updates entries. */
-  private roster = new Map<string, { name: string; keyword: string; host: boolean }>();
-  private creatorId: string | null = null;
+  /** The room's login book: playerId → credentials. Host/admin power is NOT
+   *  stored here — it is derived from character identity (see ADMIN_IDS).
+   *  Bootstrap: first join in a fresh room claims it (seeds the roster);
+   *  afterwards only an admin's start form adds/updates entries. */
+  private roster = new Map<string, { name: string; keyword: string }>();
   private chat: ChatEntry[] = [];
   private dealTimer: ReturnType<typeof setTimeout> | null = null;
   /** THE action clock (Step 6): the server owns timeouts now; client
@@ -186,9 +192,10 @@ export class TableServer extends Server<Env> {
     }
 
     if (this.roster.size === 0) {
-      // fresh room — the first join claims it and becomes host
-      this.roster.set(id, { name: id, keyword: kw, host: true });
-      this.creatorId = id;
+      // fresh room — the first join claims it (seeds the roster so people can
+      // log in). Host power is identity-based (ADMIN_IDS), NOT granted by
+      // claiming the room.
+      this.roster.set(id, { name: id, keyword: kw });
       this.pushLogQuiet(`room claimed by ${id}`);
     } else {
       const entry = this.roster.get(id);
@@ -212,7 +219,7 @@ export class TableServer extends Server<Env> {
     this.joined.set(conn.id, id);
     this.send(conn, {
       type: "you", playerId: id, seat: this.seatOf(id),
-      host: this.roster.get(id)?.host ?? false,
+      host: this.isAdmin(id),
     });
     this.send(conn, { type: "chatHistory", entries: this.chat });
     if (this.gm) {
@@ -344,9 +351,10 @@ export class TableServer extends Server<Env> {
   }
 
   private handleHost(conn: Connection, playerId: string, cmd: HostCommand) {
-    // Host commands only from connections whose ROSTER entry says host —
-    // identity from the connection map, authority from the roster.
-    if (!this.roster.get(playerId)?.host) {
+    // Host commands only from the two permanent admins — identity from the
+    // connection map, never from the message. Either admin holds every host
+    // power independently; nobody else ever does.
+    if (!this.isAdmin(playerId)) {
       return this.error(conn, "Host only");
     }
 
@@ -388,17 +396,7 @@ export class TableServer extends Server<Env> {
         }
         for (const p of cmd.players) {
           const kw = String(p.keyword ?? "").trim().toLowerCase();
-          const existing = this.roster.get(p.id);
-          this.roster.set(p.id, {
-            name: p.name,
-            keyword: kw,
-            host: !!p.host || existing?.host === true,
-          });
-        }
-        // the creator can never lock themselves out of hosting
-        if (this.creatorId) {
-          const c = this.roster.get(this.creatorId);
-          if (c) c.host = true;
+          this.roster.set(p.id, { name: p.name, keyword: kw });
         }
         this.disconnectGraceMs = cmd.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS;
         const mode: Variant = cmd.gameMode ?? "nlhe";
@@ -418,13 +416,13 @@ export class TableServer extends Server<Env> {
           this.gm = null;
           return this.error(conn, "Could not start the game");
         }
-        // roster (and host flags) may have changed — refresh everyone's "you"
+        // roster may have changed — refresh everyone's "you" (host is identity)
         for (const c of this.getConnections()) {
           const pid = this.joined.get(c.id);
           if (pid === undefined) continue;
           this.send(c, {
             type: "you", playerId: pid, seat: this.seatOf(pid),
-            host: this.roster.get(pid)?.host ?? false,
+            host: this.isAdmin(pid),
           });
         }
         break;
@@ -634,6 +632,11 @@ export class TableServer extends Server<Env> {
   }
 
   // ---------- helpers ----------
+
+  /** Host/admin authority: identity-based, the two permanent admins only. */
+  private isAdmin(playerId: string): boolean {
+    return ADMIN_IDS.has(playerId);
+  }
 
   private seatOf(playerId: string): number | null {
     if (!this.gm) return null;

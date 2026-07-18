@@ -89,9 +89,10 @@ export function Lobby({ devLocal, onStartLocal, onJoinOnline }: Props) {
                   onKeyDown={(e) => { if (e.key === "Enter" && joinValid) join(); }} /></div>
             </div>
             <p className="form-hint">
-              First person into a fresh room becomes host — their keyword is set
-              by this login. Everyone else needs the name + keyword the host
-              configured. Logging in from a new device takes your seat with you.
+              First person into a fresh room claims it — their keyword is set by
+              this login. Everyone else needs the name + keyword the host
+              configured. Parth and Kabir are always the admins. Logging in from
+              a new device takes your seat with you.
             </p>
             <button className="primary-btn" disabled={!joinValid} onClick={join}>
               Join room

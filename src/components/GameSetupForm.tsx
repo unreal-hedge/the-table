@@ -13,7 +13,6 @@ export interface SetupPlayer {
   name: string;
   buyIn: number;
   keyword?: string; // online: this player's login word (host distributes them)
-  host?: boolean;   // online: co-host flag
 }
 
 interface Props {
@@ -37,12 +36,12 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
   const [players, setPlayers] = useState<SetupPlayer[]>(
     hostLogin
       ? [
-          { id: "p1", name: hostLogin.id, buyIn: 1000, keyword: hostLogin.keyword, host: false },
-          { id: "p2", name: "", buyIn: 1000, keyword: "", host: false },
+          { id: "p1", name: hostLogin.id, buyIn: 1000, keyword: hostLogin.keyword },
+          { id: "p2", name: "", buyIn: 1000, keyword: "" },
         ]
       : [
-          { id: "p1", name: "Kabir", buyIn: 1000, keyword: "", host: false },
-          { id: "p2", name: "Parth", buyIn: 1000, keyword: "", host: false },
+          { id: "p1", name: "Kabir", buyIn: 1000, keyword: "" },
+          { id: "p2", name: "Parth", buyIn: 1000, keyword: "" },
         ]
   );
 
@@ -133,13 +132,6 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
             )}
             <input className="buyin" type="number" value={p.buyIn} title="Buy-in"
               onChange={(e) => patch(p.id, { buyIn: num(e.target.value) })} />
-            {online && (
-              <label className="cohost-toggle" title="Co-host: can pause, rebuy, end">
-                <input type="checkbox" checked={!!p.host}
-                  onChange={(e) => patch(p.id, { host: e.target.checked })} />
-                host
-              </label>
-            )}
             {players.length > 2 && !isLockedHostRow && (
               <button className="icon-btn" aria-label={`Remove ${p.name}`}
                 onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}>✕</button>
@@ -149,7 +141,7 @@ export function GameSetupForm({ submitLabel, idMode, hostLogin, onSubmit }: Prop
       })}
       {players.length < seatCap && (
         <button className="ghost-btn"
-          onClick={() => setPlayers([...players, { id: `p${Date.now()}`, name: "", buyIn: cfg.defaultBuyIn, keyword: "", host: false }])}>
+          onClick={() => setPlayers([...players, { id: `p${Date.now()}`, name: "", buyIn: cfg.defaultBuyIn, keyword: "" }])}>
           + Add player
         </button>
       )}
