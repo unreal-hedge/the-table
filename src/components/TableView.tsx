@@ -58,6 +58,8 @@ interface Props {
   onSitToggle?: (id: string, out: boolean) => void;
   onRequestSeat?: (seat: number) => void;                                                 // spectator taps an empty seat (item 2)
   onSeatRequest?: (playerId: string, action: "accept" | "reject" | "ignore", stack?: number) => void; // admin resolves it
+  onRequestChips?: (amount: number) => void;                                              // seated player asks for a rebuy (item 3)
+  onChipRequest?: (playerId: string, action: "approve" | "reject", amount?: number) => void; // admin resolves it
 }
 
 export function TableView({
@@ -65,7 +67,7 @@ export function TableView({
   connectedIds, chat, myId, onChat, corner, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
   onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
-  onRequestSeat, onSeatRequest,
+  onRequestSeat, onSeatRequest, onRequestChips, onChipRequest,
 }: Props) {
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
@@ -136,6 +138,13 @@ export function TableView({
           <button onClick={onPause}>{s.phase === "paused" ? "Resume" : "Pause"}</button>
         )}
         <button onClick={() => setShowLedger(true)}>Ledger</button>
+        {mode === "online" && mySeat != null && onRequestChips && (
+          <button onClick={() => {
+            const v = window.prompt("Rebuy — how many chips? (admin must approve)", String(s.config.defaultBuyIn));
+            const a = v == null ? NaN : Number(v);
+            if (Number.isFinite(a) && a > 0) onRequestChips(a);
+          }}>Request chips</button>
+        )}
         {isHost && onSetMode && (
           <button onClick={() => onSetMode(s.variant === "dft" ? "nlhe" : "dft")}>
             {s.variant === "dft" ? "Switch to Hold'em" : "Switch to Double Flop"}
@@ -196,12 +205,12 @@ export function TableView({
         );
       })}
 
-      {/* Admin seat-request queue (item 2): accept / edit-stack / reject / ignore. */}
-      {isHost && onSeatRequest && s.seatRequests && s.seatRequests.length > 0 && (
+      {/* Admin request queue: seat requests (item 2) + rebuy requests (item 3). */}
+      {isHost && ((s.seatRequests?.length ?? 0) > 0 || (s.chipRequests?.length ?? 0) > 0) && (
         <div className="seat-requests">
-          <div className="sr-title">Seat requests</div>
-          {s.seatRequests.map((rq) => (
-            <div key={rq.playerId} className="sr-row">
+          <div className="sr-title">Requests</div>
+          {onSeatRequest && s.seatRequests?.map((rq) => (
+            <div key={`s${rq.playerId}`} className="sr-row">
               <span className="sr-name">{rq.name} → seat {rq.seat + 1}{rq.ignored ? " · ignored" : ""}</span>
               <div className="sr-btns">
                 <button onClick={() => onSeatRequest(rq.playerId, "accept")}>Accept</button>
@@ -212,6 +221,20 @@ export function TableView({
                 }}>Edit stack</button>
                 <button onClick={() => onSeatRequest(rq.playerId, "reject")}>Reject</button>
                 {!rq.ignored && <button onClick={() => onSeatRequest(rq.playerId, "ignore")}>Ignore</button>}
+              </div>
+            </div>
+          ))}
+          {onChipRequest && s.chipRequests?.map((rq) => (
+            <div key={`c${rq.playerId}`} className="sr-row">
+              <span className="sr-name">{rq.name} → rebuy +{fmt(rq.amount)}</span>
+              <div className="sr-btns">
+                <button onClick={() => onChipRequest(rq.playerId, "approve")}>Approve</button>
+                <button onClick={() => {
+                  const val = window.prompt(`Rebuy amount for ${rq.name}?`, String(rq.amount));
+                  const amt = val == null ? NaN : Number(val);
+                  if (Number.isFinite(amt) && amt > 0) onChipRequest(rq.playerId, "approve", amt);
+                }}>Edit</button>
+                <button onClick={() => onChipRequest(rq.playerId, "reject")}>Reject</button>
               </div>
             </div>
           ))}

@@ -54,6 +54,7 @@ export interface RoomHandle {
     submitArrangement: (order: number[]) => void;       // DFT picking (6b)
     declare: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
     requestSeat: (seat: number) => void;                // spectator asks for an empty seat (item 2)
+    requestChips: (amount: number) => void;             // seated player asks for a rebuy (item 3)
   };
 }
 
@@ -167,6 +168,7 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
       submitArrangement: (order: number[]) => post({ type: "submitArrangement", order }),
       declare: (potIndex: number, decision: DftDecision) => post({ type: "declare", potIndex, decision }),
       requestSeat: (seat: number) => post({ type: "requestSeat", seat }),
+      requestChips: (amount: number) => post({ type: "requestChips", amount }),
     };
   }, []);
 

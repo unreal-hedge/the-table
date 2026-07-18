@@ -176,7 +176,15 @@ export interface GameState {
                                     // least 2 players with chips") — else null
   seatRequests?: SeatRequestView[]; // spectators asking for an empty seat (item 2);
                                     // server-injected, admins act on them
+  chipRequests?: ChipRequestView[]; // seated players asking for a rebuy (item 3)
   dft?: DftView;                    // present iff variant === "dft"
+}
+
+/** A seated player's pending rebuy/top-up request (item 3), admin-approved. */
+export interface ChipRequestView {
+  playerId: string;
+  name: string;
+  amount: number;
 }
 
 /** A spectator's pending request to take an empty seat (item 2). Public (not a

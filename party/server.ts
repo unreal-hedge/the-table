@@ -111,6 +111,8 @@ export class TableServer extends Server<Env> {
   /** Spectators asking for an empty seat (item 2): playerId → request. Persists
    *  across a session end→start so an "ignore" carries to the next game (item 4). */
   private seatRequests = new Map<string, { seat: number; ignored: boolean }>();
+  /** Seated players asking for a rebuy (item 3): playerId → amount. Transient. */
+  private chipRequests = new Map<string, number>();
 
   // ---------- connection lifecycle ----------
 
@@ -180,6 +182,7 @@ export class TableServer extends Server<Env> {
       case "submitArrangement": return this.handleSubmitArrangement(conn, playerId, msg.order);
       case "declare":           return this.handleDeclare(conn, playerId, msg.potIndex, msg.decision);
       case "requestSeat":       return this.handleRequestSeat(conn, playerId, msg.seat);
+      case "requestChips":      return this.handleRequestChips(conn, playerId, msg.amount);
       case "host":              return this.handleHost(conn, playerId, msg.cmd);
       default:                  return this.error(conn, "Unknown message type");
     }
@@ -355,6 +358,18 @@ export class TableServer extends Server<Env> {
     this.afterMutation();
   }
 
+  /** A seated player asks an admin for a rebuy/top-up (item 3). Surfaced to both
+   *  admins; chips apply only between hands and only on admin approval. A busted
+   *  player instead uses a seat request (item 2), which carries a fresh buy-in. */
+  private handleRequestChips(conn: Connection, playerId: string, amount: number) {
+    if (!this.gm) return this.error(conn, "No game running");
+    if (this.seatOf(playerId) == null) return this.error(conn, "Only a seated player can request a rebuy");
+    if (!Number.isFinite(amount) || amount <= 0) return this.error(conn, "Bad amount");
+    this.chipRequests.set(playerId, Math.floor(amount));
+    this.pushLogQuiet(`${playerId} requested +${amount} chips`);
+    this.afterMutation();
+  }
+
   private handleChat(conn: Connection, playerId: string, text: string) {
     const clean = String(text ?? "").trim().slice(0, CHAT_MAX_LENGTH);
     if (!clean) return;
@@ -502,9 +517,19 @@ export class TableServer extends Server<Env> {
         }
         break;
       }
+      case "chipRequest": {
+        const amt = this.chipRequests.get(cmd.playerId);
+        if (amt === undefined) return this.error(conn, "No such chip request");
+        if (cmd.action === "approve") {
+          this.gm?.approveAddChips(cmd.playerId, cmd.amount ?? amt); // applies between hands
+        }
+        this.chipRequests.delete(cmd.playerId);
+        break;
+      }
       case "end": {
         if (!this.gm) return this.error(conn, "No game running");
         for (const id of [...this.graceTimers.keys()]) this.clearGrace(id);
+        this.chipRequests.clear();
         const summary = this.gm.stop();
         // remember what everyone cashed out with — the rathole floor for
         // any future session in this room (3.5)
@@ -645,6 +670,11 @@ export class TableServer extends Server<Env> {
     if (this.seatRequests.size > 0) {
       s = { ...s, seatRequests: [...this.seatRequests.entries()].map(([playerId, r]) => ({
         playerId, name: this.nameOf(playerId), seat: r.seat, ignored: r.ignored,
+      })) };
+    }
+    if (this.chipRequests.size > 0) {
+      s = { ...s, chipRequests: [...this.chipRequests.entries()].map(([playerId, amount]) => ({
+        playerId, name: this.nameOf(playerId), amount,
       })) };
     }
     return s;

@@ -29,6 +29,7 @@ export type ClientMessage =
   | { type: "submitArrangement"; order: number[] }               // picking: lock my 6-card split (a permutation of 0..5)
   | { type: "declare"; potIndex: number; decision: DftDecision } // decisions: my blind run/surrender for one pot
   | { type: "requestSeat"; seat: number }                        // spectator asks an admin for an empty numbered seat (item 2)
+  | { type: "requestChips"; amount: number }                     // seated player asks an admin for a rebuy/top-up (item 3)
   | { type: "host"; cmd: HostCommand };
 
 export type HostCommand =
@@ -52,6 +53,9 @@ export type HostCommand =
   // them with `stack` (a fresh buy-in); reject drops it; ignore keeps it for the
   // next game on this table (item 4).
   | { kind: "seatRequest"; playerId: string; action: "accept" | "reject" | "ignore"; stack?: number }
+  // Admin resolves a seated player's rebuy request (item 3). approve applies
+  // `amount` (or the requested amount) between hands; reject drops it.
+  | { kind: "chipRequest"; playerId: string; action: "approve" | "reject"; amount?: number }
   | { kind: "end" };      // finalize session + ledger (7.3)
 
 export interface StartingPlayer {

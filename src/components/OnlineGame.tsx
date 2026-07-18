@@ -166,6 +166,8 @@ export function OnlineGame({ room, myId, keyword, onExit }: Props) {
       onSitToggle={isHost ? (id, out) => r.send.host({ kind: "sitOut", playerId: id, out }) : undefined}
       onRequestSeat={(seat) => r.send.requestSeat(seat)}
       onSeatRequest={isHost ? (playerId, action, stack) => r.send.host({ kind: "seatRequest", playerId, action, stack }) : undefined}
+      onRequestChips={(amount) => r.send.requestChips(amount)}
+      onChipRequest={isHost ? (playerId, action, amount) => r.send.host({ kind: "chipRequest", playerId, action, amount }) : undefined}
     />
   );
 }
