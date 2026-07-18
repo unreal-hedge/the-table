@@ -106,6 +106,20 @@ export function TableView({
     ? s.canShowSeat != null
     : s.canShowSeat != null && s.canShowSeat === mySeat;
 
+  // DFT overlay gating: only a viewer who is actively picking / owes a decision
+  // gets the modal. Spectators + folded players must NEVER be stuck behind it —
+  // they watch the table.
+  const pk = s.dft?.subPhase === "picking" ? s.dft.picking : null;
+  const iAmPicking = pk != null && mySeat != null && pk.seats.includes(mySeat);
+  const iPickLocked = pk != null && mySeat != null && pk.lockedSeats.includes(mySeat);
+  const dec = s.dft?.subPhase === "decisions" ? s.dft.decisions : null;
+  const iOweDecision =
+    dec != null && mySeat != null &&
+    dec.contests.some(
+      (c) => c.seats.includes(mySeat!) &&
+        !dec.lockedSeats.some((l) => l.seat === mySeat && l.potIndex === c.potIndex)
+    );
+
   return (
     <div className="scene">
       <div className="title-corner">The Table <span className="suit">♠</span></div>
@@ -186,8 +200,11 @@ export function TableView({
         onTimeBank={onTimeBank}
       />
 
-      {s.dft && s.dft.subPhase === "picking" && s.dft.picking && (
-        onSubmitArrangement && mode === "online" ? (
+      {/* Picking overlay: only a viewer who is actually picking sees it. An
+          active picker gets the interactive splitter; one who's locked in gets
+          a passive "waiting" veil; spectators + folded players see neither. */}
+      {s.dft && s.dft.subPhase === "picking" && s.dft.picking && iAmPicking && (
+        !iPickLocked && onSubmitArrangement && mode === "online" ? (
           <DftPicking
             key={s.handNumber}
             holeCards={s.seats.find((x) => x.seat === mySeat)?.holeCards ?? null}
@@ -202,31 +219,28 @@ export function TableView({
         ) : (
           <div className="veil">
             <div>
-              <div className="msg">Choosing hands…</div>
-              <div className="hint">Players are splitting their six cards into three hands.</div>
+              <div className="msg">Locked in ✓</div>
+              <div className="hint">Waiting for the others to choose their hands…</div>
             </div>
           </div>
         )
       )}
 
-      {s.dft && s.dft.subPhase === "decisions" && s.dft.decisions && (
-        onDeclare && mode === "online" ? (
-          <DftDecisions
-            key={s.handNumber}
-            decisions={s.dft.decisions}
-            mySeat={mySeat}
-            deadlineAt={s.turnDeadlineAt}
-            displayNow={displayNow}
-            onDeclare={onDeclare}
-          />
-        ) : (
-          <div className="veil">
-            <div>
-              <div className="msg">Run or surrender…</div>
-              <div className="hint">Players are making their blind run/surrender calls.</div>
-            </div>
-          </div>
-        )
+      {/* Decisions overlay: only a viewer who still owes a run/surrender call. */}
+      {s.dft && s.dft.subPhase === "decisions" && s.dft.decisions && iOweDecision && onDeclare && mode === "online" && (
+        <DftDecisions
+          key={s.handNumber}
+          decisions={s.dft.decisions}
+          mySeat={mySeat}
+          deadlineAt={s.turnDeadlineAt}
+          displayNow={displayNow}
+          onDeclare={onDeclare}
+        />
+      )}
+
+      {/* Why the table can't deal (both modes) — item 1, so it's never silent. */}
+      {s.waitingReason && s.phase !== "inHand" && (
+        <div className="waiting-banner">{s.waitingReason}</div>
       )}
 
       {s.dft && s.phase === "handEnded" && s.dft.flips.length > 0 && (

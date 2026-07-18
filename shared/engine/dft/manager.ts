@@ -16,7 +16,7 @@ import type {
   LedgerRow, Phase, PlayerAction, PlayerRecord, SeatView, SessionSummary,
 } from "../types";
 import type { TableEngine } from "../table-engine";
-import { nextButtonSeat, clamp, ledgerRows } from "../util";
+import { nextButtonSeat, clamp, ledgerRows, fmt } from "../util";
 import { Deck, makeRng } from "./deck";
 import { DftBetting, type BetActionType, type LegalBet } from "./betting";
 import {
@@ -44,6 +44,8 @@ export class DoubleFlopManager implements TableEngine {
   private phaseVal: DftPhase = "lobby";
   private handNumber = 0;
   private lastButton = -1;
+  private log: string[] = []; // DFT dealer log — so the table isn't silent (item 1)
+  private waitingReason: string | null = null;
 
   // per-hand
   private betting: DftBetting | null = null;
@@ -88,7 +90,8 @@ export class DoubleFlopManager implements TableEngine {
       const stack = clamp(p.buyIn, config.minBuyIn, config.maxBuyIn);
       this.players.set(p.id, {
         id: p.id, name: p.name, seat: i, stack, buyInTotal: stack,
-        sittingOut: false, consecutiveTimeouts: 0, timeBank: config.timeBankSec, pendingAddChips: 0,
+        sittingOut: false, consecutiveTimeouts: 0, timeBank: config.timeBankSec,
+        pendingAddChips: 0, spectating: false,
       });
     });
   }
@@ -129,8 +132,11 @@ export class DoubleFlopManager implements TableEngine {
     }
     if (eligibleSeats.length < 2) {
       this.phaseVal = "handEnded";
+      this.waitingReason = "Waiting for at least 2 players with chips";
+      this.pushLog(this.waitingReason);
       return;
     }
+    this.waitingReason = null;
 
     this.eligible = eligibleSeats;
     this.dealt = override
@@ -155,6 +161,7 @@ export class DoubleFlopManager implements TableEngine {
     this.flipLog = [];
     this.lastDelta = new Map();
     this.handNumber += 1;
+    this.pushLog(`— Hand #${this.handNumber} — antes in, two boards dealt`);
     this.phaseVal = "betting";
     this.pumpBetting();
   }
@@ -235,9 +242,16 @@ export class DoubleFlopManager implements TableEngine {
       if (p.pendingAddChips > 0) {
         p.stack += p.pendingAddChips;
         p.buyInTotal += p.pendingAddChips;
+        this.pushLog(`${p.name} added ${fmt(p.pendingAddChips)} chips`);
         p.pendingAddChips = 0;
       }
     }
+    // busted (stack 0) → spectator, removed from their seat; a rebuy revives one
+    for (const p of this.players.values()) p.spectating = p.stack <= 0;
+  }
+
+  private pushLog(msg: string): void {
+    this.log.push(msg);
   }
 
   /** Exact snapshot of every player's session record, for a mid-session engine
@@ -371,6 +385,14 @@ export class DoubleFlopManager implements TableEngine {
       bySeat.get(s)!.stack = b.stackOf(s) + (delta.get(s) ?? 0);
     }
     this.lastDelta = delta;
+    for (const [seat, amt] of delta) {
+      if (amt > 0) {
+        const nm = this.playerAtSeat(seat)?.name ?? `Seat ${seat + 1}`;
+        this.pushLog(`${nm} wins ${fmt(amt)}`);
+      }
+    }
+    // busted (stack 0) → spectator, removed from their seat
+    for (const p of this.players.values()) p.spectating = p.stack <= 0;
     this.phaseVal = "handEnded";
     this.phaseDeadline = null;
     this.turnStartedAt = null;
@@ -433,6 +455,7 @@ export class DoubleFlopManager implements TableEngine {
       : { a: [], b: [] };
 
     const seats: SeatView[] = [...this.players.values()]
+      .filter((p) => !p.spectating) // busted players are spectators, not seated
       .sort((x, y) => x.seat - y.seat)
       .map((p): SeatView => {
         const inHandNow = live && dealtIn.has(p.seat);
@@ -526,8 +549,9 @@ export class DoubleFlopManager implements TableEngine {
         : windowLive && this.phaseDeadline != null ? this.phaseDeadline - PICK_DECIDE_SEC * 1000 : null,
       turnDeadlineAt: this.phaseVal === "betting" ? this.turnDeadlineAt : windowLive ? this.phaseDeadline : null,
       lastHandResult,
-      log: [], // DFT dealer log: deferred to the UI step
+      log: this.log.slice(-60),
       canShowSeat: null,
+      waitingReason: this.waitingReason,
       dft,
     };
   }

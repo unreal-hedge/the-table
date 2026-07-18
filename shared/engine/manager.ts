@@ -41,6 +41,7 @@ export class GameManager {
   private turnStartedAt: number | null = null;
   private turnDeadlineAt: number | null = null;
   private pausedRemainingMs: number | null = null;
+  private waitingReason: string | null = null;
 
   constructor(config: GameConfig, starters: StartPlayer[], resume?: PlayerRecord[]) {
     this.config = config;
@@ -61,7 +62,7 @@ export class GameManager {
       this.players.set(p.id, {
         id: p.id, name: p.name, seat: i, stack: buyIn, buyInTotal: buyIn,
         sittingOut: false, consecutiveTimeouts: 0,
-        timeBank: config.timeBankSec, pendingAddChips: 0,
+        timeBank: config.timeBankSec, pendingAddChips: 0, spectating: false,
       });
     });
     this.pushLog(`Table created — blinds ${config.smallBlind}/${config.bigBlind}`);
@@ -175,9 +176,11 @@ export class GameManager {
     );
     if (eligible.length < 2) {
       this.phase = "handEnded";
-      this.pushLog("Waiting for at least 2 active players…");
+      this.waitingReason = "Waiting for at least 2 players with chips";
+      this.pushLog(this.waitingReason);
       return;
     }
+    this.waitingReason = null;
     for (const p of eligible) this.table.sitDown(p.seat, p.stack);
 
     this.handNumber += 1;
@@ -360,6 +363,7 @@ export class GameManager {
     const legal = toAct != null ? this.table.legalActions() : null;
 
     const seats: SeatView[] = [...this.players.values()]
+      .filter((p) => !p.spectating) // busted players are spectators, not seated
       .sort((a, b) => a.seat - b.seat)
       .map((p) => {
         const ts = tableSeats[p.seat] ?? null;
@@ -407,6 +411,7 @@ export class GameManager {
       lastHandResult: this.lastHandResult,
       log: this.log.slice(-60),
       canShowSeat: this.canShowSeat,
+      waitingReason: this.waitingReason,
     };
   }
 
@@ -445,6 +450,8 @@ export class GameManager {
         p.pendingAddChips = 0;
       }
     }
+    // busted (stack 0) → spectator, removed from their seat; a rebuy revives one
+    for (const p of this.players.values()) p.spectating = p.stack <= 0;
   }
 
   private wasDealtIn(seat: number): boolean {

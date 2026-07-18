@@ -178,6 +178,17 @@ input { font: inherit; color: var(--text); }
 .round-tag { position: absolute; left: 50%; top: 34.5%; transform: translateX(-50%);
   font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
 
+/* Why the table can't deal (item 1) — a prominent, non-blocking banner so the
+   table is never silently frozen. Sits over the felt; players/spectators still
+   see the table around it. */
+.waiting-banner {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 12; text-align: center; max-width: 78%;
+  font-family: var(--font-display), sans-serif; font-size: 18px; font-weight: 600;
+  color: var(--gold); background: rgba(10, 14, 12, 0.82);
+  padding: 14px 26px; border-radius: 14px; border: 1px solid rgba(217, 164, 65, 0.45);
+}
+
 /* ============ DFT PICKING (hand-split screen) ============ */
 /* margin:auto on the flex child centers it AND yields on overflow, so tall
    content scrolls instead of clipping at the top (unlike align-items:center). */

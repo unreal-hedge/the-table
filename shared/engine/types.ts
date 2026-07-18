@@ -44,6 +44,9 @@ export interface PlayerRecord {
   consecutiveTimeouts: number; // 2 in a row => auto sit-out (6.1)
   timeBank: number;        // seconds remaining (5.2)
   pendingAddChips: number; // approved rebuys applied between hands (3.4)
+  spectating?: boolean;    // busted (stack 0) → removed from their seat but stays
+                           // a live session member (ledger + spectator view). A
+                           // rebuy/re-seat clears it. Absent === seated.
 }
 
 /** What the UI needs to draw one seat. */
@@ -167,6 +170,8 @@ export interface GameState {
   lastHandResult: HandResultShare[] | null;
   log: string[];                    // dealer log, newest last
   canShowSeat: number | null;       // fold-win: this seat may voluntarily show (9.1)
+  waitingReason: string | null;     // why the table can't deal ("Waiting for at
+                                    // least 2 players with chips") — else null
   dft?: DftView;                    // present iff variant === "dft"
 }
 
