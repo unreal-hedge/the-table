@@ -9,6 +9,13 @@ Ordered. Do them top to bottom. Item 1 blocks everything else.
 > **DONE 2026-09-11** — deployed `22fbcf8` (all of items 1–6) as worker version
 > `cc35831f`, after `party:check` + `test-engine` + `test-filter` came back green
 > on this code. Production client and server are back in sync.
+>
+> **⚠️ ONE MORE DORMANT COMMIT:** `9838efa` (fixes the Hold'em → Double Flop
+> switch, which item 2's numbered seats broke — see the QA note under item 4) is
+> pushed but **not deployed**: Kabir's local `wrangler login` expired mid-session
+> and can't refresh non-interactively. Kabir: run `npx wrangler login` in a
+> terminal, then `npm run party:deploy` — or add the two CI secrets (item 2) and
+> re-run the "Deploy game server" Action, which is the permanent fix.
 
 The Cloudflare worker **does not auto-deploy.** Every commit since `b082c62`
 that touches `party/` or `shared/` is pushed to `main` but **dormant** — the
