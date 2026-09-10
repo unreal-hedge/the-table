@@ -116,6 +116,50 @@ playtest, sanity-check these at **desktop and on the phone (375px)**:
 Log anything ugly or broken back to Parth — visual polish that isn't a
 correctness bug can fold into Phase 1E.
 
+> **QA DONE 2026-09-11** (real browser, desktop + 375px, local server + a
+> non-admin bot as the second player). Every surface above renders and works:
+> - **Item 1** banner: centered, readable, felt visible around it; spectators not trapped. ✅
+> - **Item 2** seats: DFT 1–7 render; "tap to sit" shows only for a spectator; the
+>   Requests panel appears with Accept / Edit stack / Reject / Ignore, all reachable. ✅
+> - **Item 3**: "Request chips" visible to a seated player; the admin sees
+>   "arjun → rebuy +1,000" with Approve / Edit / Reject. ✅
+> - **Item 4**: Restart / End present for admins, absent for a non-admin; Restart →
+>   "Session over" settled ledger → Back to room → fresh hand #1, same crew. ✅
+>   (Deal-next only appears at handEnded — not captured, logic reviewed.)
+> - **Item 5**: CREATE shows mode + blinds + stack, JOIN only character/table/keyword;
+>   both one-thumb at 375px. ✅
+> - **Item 7**: the pot is the biggest number on the felt (between the boards in DFT);
+>   every stack legible. ✅
+>
+> **Found and FIXED (commit after this note):**
+> - **Regression — Hold'em → Double Flop switch was impossible.** `setGameMode`'s
+>   7-max guard counted every numbered slot (item 2 made `seats` always 8 long), so
+>   an 8-slot NLHE table always got "seats 7 max — sit someone out first". Now skips
+>   `empty` seats. Caught by `test-online-dft.ts` — **run the online E2Es too**
+>   (`test-online.ts`, `test-online-dft.ts`), not just the five lifecycle tests.
+> - `test-online.ts` was stale against items 1–5 (it rebought busted players via
+>   `addChips`, but a busted player is now unseated → the table parked). Its bots
+>   now use the real lifecycle: unseated → `requestSeat`, host accepts with a stack.
+>
+> **Found, NOT fixed — for Parth / 1E (none block the playtest):**
+> 1. **375px: the admin side-controls column (7 buttons) covers Seat 5 and clips
+>    Seat 4** at the top of the table. Needs a compact admin menu on phones.
+> 2. **The Requests panel sits on top of FOLD / CHECK / CALL** at both widths — when
+>    it's the admin's turn to act, their own buttons are hidden. Move it or collapse it.
+> 3. **Dealer log spam:** "Waiting for at least 2 players with chips" is appended on
+>    every broadcast (3× within seconds). Log it once, on change.
+> 4. **Spectators still see the (disabled) FOLD / CHECK / CALL / RAISE bar** — hide it
+>    for unseated viewers now that spectating is a real state.
+> 5. Lobby subtitle still reads "Private cash game · No-Limit Hold'em" — stale.
+> 6. Rebuy amount, edit-stack, and the Restart confirm use raw `window.prompt` /
+>    `window.confirm` — functional, but generic browser dialogs. 1E polish.
+> 7. Worth a look in the playtest: after a Restart, a player the clock had auto-sat-out
+>    still showed "sitting out" on the fresh table while apparently dealt in.
+> 8. **Item 5 tradeoff, decide consciously:** self-registration makes username
+>    enumeration possible (known name + wrong keyword → rejected; unknown name →
+>    admitted as a spectator). Fine for a private game, but HANDOFF's "no
+>    enumeration" claim is now stale — `test-online.ts` asserts the new behaviour.
+
 ---
 
 ## 5. FYI — nothing to do, just know

@@ -472,9 +472,11 @@ export class TableServer extends Server<Env> {
         if (target === this.variant && !this.pendingVariant) {
           return this.error(conn, `Already playing ${modeLabel(target)}`);
         }
-        // 7-max guard for a switch TO dft — refuse loudly, never auto-sit anyone
+        // 7-max guard for a switch TO dft — refuse loudly, never auto-sit anyone.
+        // `seats` carries every numbered slot (item 2), so skip the EMPTY ones or an
+        // 8-slot Hold'em table can never switch (caught by test-online-dft).
         if (target === "dft") {
-          const dealtIn = this.gm.state().seats.filter((s) => !s.sittingOut).length;
+          const dealtIn = this.gm.state().seats.filter((s) => !s.empty && !s.sittingOut).length;
           if (dealtIn > MAX_DFT_SEATS) {
             return this.error(conn, `Double Flop Tex seats ${MAX_DFT_SEATS} max — sit someone out first`);
           }

@@ -80,7 +80,8 @@ class Bot {
   leftDeliberately = false;
   private chatSent = false;
   private misbehaved = false;
-  private lastRebuyHand = 0;
+  private seatRequested = false;            // unseated (busted) and already asked for a seat
+  private accepted = new Set<string>();     // host: "hand:playerId" seat requests already accepted
 
   private usedTimeBank = false;
   private tbDeadlineBefore: number | null = null;
@@ -167,15 +168,26 @@ class Bot {
       return;
     }
 
-    // host tops up busted players between hands (once per hand end) —
-    // without this, two bust-outs leave <2 eligible and the game
-    // legitimately waits forever
-    if (this.opts.isHost && s.phase === "handEnded" && s.handNumber > this.lastRebuyHand) {
-      this.lastRebuyHand = s.handNumber;
-      for (const seat of s.seats) {
-        if (seat.stack === 0) {
-          this.send({ type: "host", cmd: { kind: "addChips", playerId: seat.id, amount: 2000 } });
-        }
+    // Lifecycle (Parth's items 1–3): a busted player is UNSEATED — a live
+    // spectator — and re-enters by tapping an empty seat, which an admin
+    // accepts with a fresh stack between hands. Mirror that here so two
+    // bust-outs never park the table: unseated bots ask, the host accepts.
+    // (The old host `addChips` on a stack-0 seat no longer applies — a busted
+    // player has no seat to top up.)
+    if (this.seat == null && s.phase !== "ended" && !this.seatRequested) {
+      const empty = s.seats.find((x) => x.empty);
+      if (empty) {
+        this.seatRequested = true;
+        this.send({ type: "requestSeat", seat: empty.seat });
+      }
+    }
+    if (this.seat != null) this.seatRequested = false;
+    if (this.opts.isHost && s.phase === "handEnded") {
+      for (const rq of s.seatRequests ?? []) {
+        const key = `${s.handNumber}:${rq.playerId}`;
+        if (this.accepted.has(key)) continue;
+        this.accepted.add(key);
+        this.send({ type: "host", cmd: { kind: "seatRequest", playerId: rq.playerId, action: "accept", stack: 2000 } });
       }
     }
 
@@ -250,24 +262,38 @@ class Bot {
 }
 
 // ---- mallory: login probing (condition 5) ----
-// One socket, two bad attempts: wrong keyword for a REAL player, then
-// any keyword for a GHOST player. Responses must be identical, and she
-// must never receive an ounce of game data.
+// A wrong keyword for a REAL character must get the single opaque rejection
+// and never an ounce of game data. A character NEW to the room now
+// SELF-REGISTERS (Parth's item 5) — a ghost name is admitted as a spectator
+// rather than rejected — so what must still hold for the ghost is that it is
+// never sent anyone's un-revealed cards.
 const malloryErrors: string[] = [];
-let malloryLeaked = false;
+let malloryLeaked = false;   // wrong-keyword socket got anything beyond the blank handshake
+let ghostAdmitted = false;   // the ghost received a session (item 5 self-registration)
+let ghostSawHidden = false;  // the ghost was sent someone's un-revealed hole cards
 function runMallory() {
-  const ws = new WebSocket(wsUrl());
-  ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({ type: "join", playerId: "arjun", keyword: "totally-wrong" }));
-    setTimeout(() => {
-      ws.send(JSON.stringify({ type: "join", playerId: "ghost-player", keyword: "whatever" }));
-    }, 500);
+  const bad = new WebSocket(wsUrl());
+  bad.addEventListener("open", () => {
+    bad.send(JSON.stringify({ type: "join", playerId: "arjun", keyword: "totally-wrong" }));
   });
-  ws.addEventListener("message", (e) => {
+  bad.addEventListener("message", (e) => {
     const msg: ServerMessage = JSON.parse(String(e.data));
     if (msg.type === "error") malloryErrors.push(msg.msg);
     // the pre-login "you" handshake carries no identity; anything else does
     else if (msg.type !== "you" || msg.playerId !== "") malloryLeaked = true;
+  });
+  const ghost = new WebSocket(wsUrl());
+  ghost.addEventListener("open", () => {
+    ghost.send(JSON.stringify({ type: "join", playerId: "ghost-player", keyword: "whatever" }));
+  });
+  ghost.addEventListener("message", (e) => {
+    const msg: ServerMessage = JSON.parse(String(e.data));
+    if (msg.type === "you" && msg.playerId === "ghost-player") ghostAdmitted = true;
+    if (msg.type === "state") {
+      for (const seat of msg.state.seats) {
+        if (!seat.revealed && seat.holeCards !== null) ghostSawHidden = true;
+      }
+    }
   });
 }
 
@@ -275,8 +301,9 @@ function runMallory() {
 const kabir = new Bot("kabir", "kabir", {
   isHost: true,
   misbehave: "timebank",
-  // expected rejections: the bad-start guard + the rathole restart test
-  allowedErrors: ["not in the player list", "Rathole rule"],
+  // expected rejections: the bad-start guard, the rathole restart test, and a
+  // seat-accept that races the auto-deal (the next handEnded retries it)
+  allowedErrors: ["not in the player list", "Rathole rule", "No such seat request", "Can only seat a player between hands"],
 });
 const bots: Bot[] = [kabir];
 let arjun: Bot, dev1: Bot, dev2: Bot | null = null;
@@ -349,7 +376,7 @@ const poll = setInterval(() => {
   // purpose), dev1 kicked, arjun's grace expired, mallory rejected twice
   if (!dev2 || !kabir.gotEnded || !dev2.gotEnded) return;
   if (!dev1.kicked || !arjun.leftDeliberately || !graceSitOutObserved) return;
-  if (malloryErrors.length < 2) return;
+  if (malloryErrors.length < 1 || !ghostAdmitted) return;
 
   // act 2 (Step 8): restart the room — first violating the rathole
   // floor (richest cash-out re-enters at the 500 minimum), then compliant
@@ -432,15 +459,18 @@ const poll = setInterval(() => {
     fail("dev2 (takeover device) never actually played");
   }
 
-  // condition 5: identical, unrevealing login failures
-  if (malloryErrors.length !== 2) fail(`mallory got ${malloryErrors.length} errors, expected 2`);
-  if (malloryErrors[0] !== INVALID_LOGIN || malloryErrors[1] !== INVALID_LOGIN) {
-    fail(`login failures differ or leak info: ${JSON.stringify(malloryErrors)}`);
+  // condition 5: a wrong keyword gets the one opaque rejection and no data;
+  // a brand-new character self-registers (item 5) but still sees no secrets
+  if (malloryErrors.length !== 1) fail(`mallory got ${malloryErrors.length} errors, expected 1`);
+  if (malloryErrors[0] !== INVALID_LOGIN) {
+    fail(`login failure leaks info: ${JSON.stringify(malloryErrors)}`);
   }
   if (malloryLeaked) fail("mallory received game data without logging in");
+  if (!ghostAdmitted) fail("a character new to the room was NOT self-registered (item 5)");
+  if (ghostSawHidden) fail("a self-registered spectator received un-revealed hole cards");
 
   console.log(`hands: ${sum.handsPlayed} · strips: kabir=${kabir.stripChecks} arjun=${arjun.stripChecks} dev2=${dev2!.stripChecks}`);
-  console.log("out-of-turn rejected ✅ · non-host rejected ✅ · identical invalid logins ✅");
+  console.log("out-of-turn rejected ✅ · non-host rejected ✅ · wrong keyword rejected, new character self-registered (no secrets) ✅");
   console.log(`takeover: dev1 kicked at hand ≥${TAKEOVER_AT_HAND}, silent after (${dev1.statesAfterKick} leaks) · dev2 played on ✅`);
   console.log("server clock timed out a silent player ✅ · time bank extended deadline ✅ · out-of-turn timeBank rejected ✅");
   console.log(`disconnect grace: arjun left at hand ${LEAVE_AT_HAND}, presence dropped him, grace sat him out, game finished without him ✅`);
