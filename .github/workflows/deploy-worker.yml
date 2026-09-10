@@ -1,0 +1,58 @@
+# Auto-deploy the game server (Cloudflare Worker + Durable Object) so it can
+# never lag `main` again. Vercel already auto-deploys the frontend on every push;
+# this closes the other half — before it existed, every `party/` or `shared/`
+# commit sat dormant until Kabir personally ran `npm run party:deploy`, and the
+# live client and server drifted out of sync (docs/KABIR-TODO.md, item 2).
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" template, scoped to the account
+#   CLOUDFLARE_ACCOUNT_ID  — the account id (Cloudflare dashboard → Workers → right sidebar)
+name: Deploy game server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "party/**"
+      - "shared/**"
+      - "patches/**"          # the load-bearing poker-ts patch ships with the worker bundle
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch:          # manual re-run from the Actions tab
+
+# One deploy at a time, in commit order — never let two pushes race the worker.
+concurrency:
+  group: deploy-game-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # postinstall applies patches/poker-ts+1.5.0.patch — the deploy bundle must carry it
+      - run: npm ci
+
+      # The same gates CLAUDE.md requires before any push: chip conservation + worker types.
+      - name: Engine conservation gate
+        run: npx tsx test-engine.ts
+
+      - name: Filter leak gate
+        run: npx tsx test-filter.ts
+
+      - name: Type-check the worker
+        run: npm run party:check
+
+      - name: Deploy to Cloudflare
+        run: npm run party:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

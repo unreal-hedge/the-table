@@ -6,6 +6,10 @@ Ordered. Do them top to bottom. Item 1 blocks everything else.
 
 ## 1. DEPLOY THE WORKER — nothing below works until you do this
 
+> **DONE 2026-09-11** — deployed `22fbcf8` (all of items 1–6) as worker version
+> `cc35831f`, after `party:check` + `test-engine` + `test-filter` came back green
+> on this code. Production client and server are back in sync.
+
 The Cloudflare worker **does not auto-deploy.** Every commit since `b082c62`
 that touches `party/` or `shared/` is pushed to `main` but **dormant** — the
 live server is still running old code. The **frontend already auto-deployed**
@@ -37,6 +41,17 @@ build.
 ---
 
 ## 2. Give Parth a way to deploy the worker — so item 1 stops recurring
+
+> **PIPELINE LANDED 2026-09-11, secrets pending.** The "best long-term" option
+> below is built: `.github/workflows/deploy-worker.yml` auto-deploys the worker on
+> every push to `main` that touches `party/**`, `shared/**`, `patches/**`, or the
+> package files (gated on `test-engine` + `test-filter` + `party:check`). It is
+> **dormant until Kabir adds two repo secrets** (GitHub → Settings → Secrets and
+> variables → Actions): `CLOUDFLARE_API_TOKEN` ("Edit Cloudflare Workers"
+> template, scoped to the account) and `CLOUDFLARE_ACCOUNT_ID` (dashboard →
+> Workers & Pages → right sidebar). Then re-run the workflow once from the
+> Actions tab to prove it. Until then, manual `npm run party:deploy` still applies.
+> Parth needs no Cloudflare access at all once this is green — pushing is deploying.
 
 This keeps happening because the worker lives on **your** Cloudflare account and
 Parth has no token. Every time Parth ships a `party/` or `shared/` change it sits
