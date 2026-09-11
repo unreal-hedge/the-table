@@ -41,7 +41,9 @@ export interface PlayerRecord {
   stack: number;           // current chips (synced from table after each hand)
   buyInTotal: number;      // ledger: everything they've put in (3.6)
   sittingOut: boolean;     // 6.x
-  consecutiveTimeouts: number; // 2 in a row => auto sit-out (6.1)
+  consecutiveTimeouts: number; // informational — the auto sit-out rule is inactiveHands (1E.1)
+  inactiveHands?: number;  // whole hands dealt in with NO action of any kind (fold/check/call/
+                           // bet/raise/time bank/lock/declare); 2 in a row => sit out (1E.1)
   timeBank: number;        // seconds remaining (5.2)
   pendingAddChips: number; // approved rebuys applied between hands (3.4)
   spectating?: boolean;    // busted (stack 0) → removed from their seat but stays
@@ -136,9 +138,18 @@ export interface DftFlipView {
   winners: number[];          // seat(s) that won this flip (>1 = tie)
   amount: number;             // chips this flip contested
 }
+/** How one pot resolved at showdown (handEnded only) — drives the slow replay. */
+export type DftContestKind = "whole" | "headsup" | "gtdHeadsUp" | "gtdMulti" | "boardSplit";
+export interface DftContestSummary {
+  potIndex: number;
+  amount: number;
+  kind: DftContestKind;
+  banker?: number; // the guaranteed-50% owner in a gtd* contest
+}
 export interface DftView {
   subPhase: DftSubPhase;
   boards: DftBoardsView;
+  contests?: DftContestSummary[]; // handEnded: per-pot resolution kinds (public; the flips above carry the cards)
   // picking phase: who's involved + who has locked (both public "who")
   picking: { deadlineAt: number | null; seats: number[]; lockedSeats: number[] } | null;
   // decisions phase: the contests + who has declared (public); the WHAT
@@ -172,8 +183,12 @@ export interface GameState {
   lastHandResult: HandResultShare[] | null;
   log: string[];                    // dealer log, newest last
   canShowSeat: number | null;       // fold-win: this seat may voluntarily show (9.1)
+  showableSeats?: number[];         // handEnded: seats that may still SHOW their hand (folded players
+                                    // + the fold-win winner) — the voluntary SHOW HANDS button (1E.7)
   waitingReason: string | null;     // why the table can't deal ("Waiting for at
                                     // least 2 players with chips") — else null
+  runoutCards?: number;             // handEnded: board cards dealt out at once AFTER betting ended
+                                    // (all-in) — the client reveals them one at a time, with a beat
   seatRequests?: SeatRequestView[]; // spectators asking for an empty seat (item 2);
                                     // server-injected, admins act on them
   chipRequests?: ChipRequestView[]; // seated players asking for a rebuy (item 3)

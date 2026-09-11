@@ -174,6 +174,11 @@ class Bot {
     // bust-outs never park the table: unseated bots ask, the host accepts.
     // (The old host `addChips` on a stack-0 seat no longer applies — a busted
     // player has no seat to top up.)
+    // a request the host could no longer honour ("That seat filled up") is dropped
+    // server-side — ask again for whatever is empty now
+    if (this.seat == null && this.seatRequested && !(s.seatRequests ?? []).some((rq) => rq.playerId === this.id)) {
+      this.seatRequested = false;
+    }
     if (this.seat == null && s.phase !== "ended" && !this.seatRequested) {
       const empty = s.seats.find((x) => x.empty);
       if (empty) {
@@ -303,7 +308,10 @@ const kabir = new Bot("kabir", "kabir", {
   misbehave: "timebank",
   // expected rejections: the bad-start guard, the rathole restart test, and a
   // seat-accept that races the auto-deal (the next handEnded retries it)
-  allowedErrors: ["not in the player list", "Rathole rule", "No such seat request", "Can only seat a player between hands"],
+  // …and "That seat filled up": two bots that bust in the SAME hand both ask
+  // for the first empty seat; the host accepts both, the second is refused and
+  // asks again next state (see onState)
+  allowedErrors: ["not in the player list", "Rathole rule", "No such seat request", "Can only seat a player between hands", "That seat filled up"],
 });
 const bots: Bot[] = [kabir];
 let arjun: Bot, dev1: Bot, dev2: Bot | null = null;

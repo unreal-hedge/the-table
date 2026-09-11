@@ -26,6 +26,7 @@ import { GameManager, fmt } from "../shared/engine/manager";
 import { DoubleFlopManager, MAX_DFT_SEATS } from "../shared/engine/dft/manager";
 import type { GameConfig, GameState, PlayerRecord, Variant } from "../shared/engine/types";
 import { filterStateFor } from "./filter";
+import { handEndHoldMs } from "../shared/engine/timing";
 import {
   ClientMessage, ServerMessage, HostCommand, ChatEntry, PresenceMember, StartingPlayer,
   CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH, INVALID_LOGIN,
@@ -42,13 +43,6 @@ export interface Env {
   TableServer: DurableObjectNamespace<TableServer>;
 }
 
-// Matches the hot-seat UI's pause between hands (page.tsx uses 4200ms).
-const HAND_END_PAUSE_MS = 4200;
-// A DFT hand that resolved through flips holds the table longer so the
-// sequential flip reveal (DftReveal) can finish before the next deal.
-const DFT_REVEAL_BASE_MS = 3000;
-const DFT_REVEAL_PER_FLIP_MS = 2400; // matches DftReveal's STEP_MS
-const DFT_REVEAL_MAX_MS = 13_000;
 // Server-side slack past the action deadline before forcing the auto
 // check/fold — covers network latency so a buzzer-beater call isn't
 // unfairly beaten by the server's own clock (Step 6, spec 5.3).
@@ -178,6 +172,7 @@ export class TableServer extends Server<Env> {
       case "act":               return this.handleAct(conn, playerId, msg.action, msg.amount);
       case "timeBank":          return this.handleTimeBank(conn, playerId);
       case "show":              return this.handleShow(conn, playerId);
+      case "sitToggle":         return this.handleSitToggle(conn, playerId, msg.out);
       case "chat":              return this.handleChat(conn, playerId, msg.text);
       case "draftArrangement":  return this.handleDraftArrangement(conn, playerId, msg.order);
       case "submitArrangement": return this.handleSubmitArrangement(conn, playerId, msg.order);
@@ -294,11 +289,20 @@ export class TableServer extends Server<Env> {
   private handleShow(conn: Connection, playerId: string) {
     const g = this.gm;
     if (!g) return this.error(conn, "No game running");
-    if (!(g instanceof GameManager)) return this.error(conn, "Not available in this mode");
     const seat = this.seatOf(playerId);
-    // Same rule as act: only the seat the ENGINE says may show, may show.
-    if (seat == null || g.state().canShowSeat !== seat) return this.error(conn, "You can't show right now");
+    // Same rule as act: only a seat the ENGINE says may show, may show (1E.7).
+    if (seat == null || !g.canShow(seat)) return this.error(conn, "You can't show right now");
     g.voluntaryShow(seat);
+    this.afterMutation();
+  }
+
+  /** A seated player sits out or comes back on their own (1E.1) — the engine
+   *  applies it from the next deal; the current hand is unaffected. */
+  private handleSitToggle(conn: Connection, playerId: string, out: boolean) {
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (this.seatOf(playerId) == null) return this.error(conn, "You're not seated");
+    g.toggleSitOut(playerId, !!out);
     this.afterMutation();
   }
 
@@ -709,12 +713,11 @@ export class TableServer extends Server<Env> {
     return this.gm?.state().phase === "paused";
   }
 
-  /** How long to hold a finished hand before the next deal. A DFT hand that
-   *  resolved through flips gets extra time so the reveal can play out. */
+  /** How long to hold a finished hand before the next deal: exactly as long
+   *  as the client's showdown choreography needs (shared/engine/timing.ts),
+   *  so the next deal never cuts a reveal short. */
   private handEndPauseMs(base: GameState): number {
-    const flips = base.variant === "dft" ? (base.dft?.flips.length ?? 0) : 0;
-    if (flips > 0) return Math.min(DFT_REVEAL_MAX_MS, DFT_REVEAL_BASE_MS + flips * DFT_REVEAL_PER_FLIP_MS);
-    return HAND_END_PAUSE_MS;
+    return handEndHoldMs(base);
   }
 
   private announce(msg: string): void {

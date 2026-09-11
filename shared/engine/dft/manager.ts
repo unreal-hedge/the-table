@@ -78,6 +78,11 @@ export class DoubleFlopManager implements TableEngine {
   // a hand that ended by folds keeps its boards at the depth reached — the
   // unseen turn/river are never dealt out (no rabbit hunting)
   private endedByFold = false;
+  // seats that did ANYTHING this hand (bet action, time bank, lock, declare) —
+  // the inactivity sit-out (1E.1) counts whole hands with nothing at all
+  private actedThisHand = new Set<number>();
+  // folded seats that voluntarily showed once the hand was over (1E.7)
+  private shownSeats = new Set<number>();
 
   constructor(config: GameConfig, starters: DftStarter[], seed: number, resume?: PlayerRecord[]) {
     this.config = config;
@@ -169,6 +174,8 @@ export class DoubleFlopManager implements TableEngine {
     this.lastActionBySeat = new Map();
     this.showdownSeats = [];
     this.endedByFold = false;
+    this.actedThisHand = new Set();
+    this.shownSeats = new Set();
     this.lockedPick = new Set();
     this.prepared = null;
     this.decisions = new Map();
@@ -212,7 +219,7 @@ export class DoubleFlopManager implements TableEngine {
     if (p) p.consecutiveTimeouts = 0; // a real action resets the timeout streak (6.1)
     const legal = this.betting!.legal();
     this.betting!.act(action, amount);
-    if (actor != null) this.recordAction(actor, action, amount, legal.callAmount);
+    if (actor != null) { this.recordAction(actor, action, amount, legal.callAmount); this.actedThisHand.add(actor); }
     this.pumpBetting();
   }
 
@@ -225,10 +232,7 @@ export class DoubleFlopManager implements TableEngine {
     const legal = this.betting!.legal();
     const auto: BetActionType = legal.actions.includes("check") ? "check" : "fold";
     const p = this.playerAtSeat(seat);
-    if (p) {
-      p.consecutiveTimeouts += 1;
-      if (p.consecutiveTimeouts >= 2 && !p.sittingOut) p.sittingOut = true;
-    }
+    if (p) p.consecutiveTimeouts += 1; // a timeout is NOT activity (1E.1)
     this.betting!.act(auto);
     this.pushLog(`${this.nameAt(seat)} timed out — auto ${auto}`);
     this.recordAction(seat, auto, undefined, 0);
@@ -244,8 +248,24 @@ export class DoubleFlopManager implements TableEngine {
     const grant = Math.min(p.timeBank, 30);
     p.timeBank -= grant;
     this.turnDeadlineAt += grant * 1000;
+    this.actedThisHand.add(actor!);
     this.pushLog(`${p.name} uses time bank (+${grant}s)`);
     return true;
+  }
+
+  /** May this seat voluntarily show its hand right now? Only once the hand is
+   *  over, for a dealt-in seat not already face-up (1E.7). */
+  canShow(seat: number): boolean {
+    return this.phaseVal === "handEnded" && this.eligible.includes(seat) &&
+      !this.shownSeats.has(seat) && !(this.showdownSeats.includes(seat) && !this.betting!.isFolded(seat));
+  }
+
+  /** Voluntary show once the hand is over (1E.7): a folded player, or the
+   *  fold-win winner, turns their six cards face-up for the table. */
+  voluntaryShow(seat: number): void {
+    if (!this.canShow(seat)) return;
+    this.shownSeats.add(seat);
+    this.pushLog(`${this.nameAt(seat)} shows their hand`);
   }
 
   /** Seat badge + dealer-log line for a betting action (mirrors NLHE's labels). */
@@ -284,9 +304,10 @@ export class DoubleFlopManager implements TableEngine {
 
   toggleSitOut(playerId: string, out: boolean): void {
     const p = this.players.get(playerId);
-    if (!p) return;
+    if (!p || p.sittingOut === out) return;
     p.sittingOut = out;
-    if (!out) p.consecutiveTimeouts = 0;
+    if (!out) { p.consecutiveTimeouts = 0; p.inactiveHands = 0; }
+    this.pushLog(`${p.name} ${out ? "sits out" : "is back in"}`);
     // takes effect at next deal; the current hand is unaffected (6.2)
   }
 
@@ -405,6 +426,7 @@ export class DoubleFlopManager implements TableEngine {
     this.arrangements.set(seat, arrangementFromOrder(this.dealt!.hole.get(seat)!, order));
     this.arrangementOrder.set(seat, [...order]);
     this.lockedPick.add(seat);
+    this.actedThisHand.add(seat);
     if (this.showdownSeats.every((s) => this.lockedPick.has(s))) this.finishPicking();
   }
   /** Timer fired: lock every un-submitted seat at its current (default) layout. */
@@ -457,6 +479,7 @@ export class DoubleFlopManager implements TableEngine {
       }
     }
     this.decisions.set(key, decision);
+    this.actedThisHand.add(seat);
     if (this.pendingDecisions().length === 0) this.finalizeShowdown();
   }
   /** Timer fired: everyone who didn't declare defaults to RUN (play it out). */
@@ -483,10 +506,21 @@ export class DoubleFlopManager implements TableEngine {
         this.pushLog(`${nm} wins ${fmt(amt)}`);
       }
     }
-    // time bank refill: +5s per hand played, capped (5.2)
+    // time bank refill: +5s per hand played, capped (5.2); inactivity sit-out
+    // (1E.1): a whole hand with no action of any kind counts one, any action
+    // resets, two in a row sits them out from the next deal
     for (const s of this.eligible) {
       const p = bySeat.get(s);
-      if (p) p.timeBank = Math.min(this.config.timeBankSec, p.timeBank + 5);
+      if (!p) continue;
+      p.timeBank = Math.min(this.config.timeBankSec, p.timeBank + 5);
+      if (this.actedThisHand.has(s)) p.inactiveHands = 0;
+      else {
+        p.inactiveHands = (p.inactiveHands ?? 0) + 1;
+        if (p.inactiveHands >= 2 && !p.sittingOut) {
+          p.sittingOut = true;
+          this.pushLog(`${p.name} sat out — no action for two hands`);
+        }
+      }
     }
     // busted (stack 0) → spectator, removed from their seat
     for (const p of this.players.values()) p.spectating = p.stack <= 0;
@@ -588,7 +622,7 @@ export class DoubleFlopManager implements TableEngine {
         // full truth: every dealt-in seat's cards ride here for the whole hand
         // (and through handEnded); the filter strips un-revealed ones per viewer
         holeCards: wasDealt ? (this.dealt!.hole.get(p.seat) ?? null) : null,
-        revealed: cardsRevealed && isShowdownSeat && !folded,
+        revealed: (cardsRevealed && isShowdownSeat && !folded) || (ended && this.shownSeats.has(p.seat)),
         lastAction: this.lastActionBySeat.get(p.seat) ?? null,
         timeBank: p.timeBank,
         // the working split from the deal (2.4), the locked one after picking;
@@ -625,6 +659,13 @@ export class DoubleFlopManager implements TableEngine {
       dft = {
         subPhase: this.phaseVal === "betting" ? "betting" : this.phaseVal === "picking" ? "picking" : "decisions",
         boards, picking, decisions,
+        // how each pot resolved — public once the hand is over (the replay's script)
+        contests: this.phaseVal === "handEnded" && this.prepared
+          ? this.prepared.map((c) => ({
+              potIndex: c.potIndex, amount: c.amount, kind: c.kind,
+              banker: c.kind === "gtdHeadsUp" || c.kind === "gtdMulti" ? c.banker : undefined,
+            }))
+          : undefined,
         // reveal the flips ONLY once the hand is over — during the blind
         // decisions phase the rep-flip results already sit in flipLog but must
         // not reach any client (they'd tip the run/surrender math).
@@ -665,6 +706,7 @@ export class DoubleFlopManager implements TableEngine {
       lastHandResult,
       log: this.log.slice(-60),
       canShowSeat: null,
+      showableSeats: ended ? seats.filter((v) => !v.empty && this.canShow(v.seat)).map((v) => v.seat) : undefined,
       waitingReason: this.waitingReason,
       dft,
     };

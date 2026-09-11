@@ -37,8 +37,12 @@ export class GameManager {
   private foldedSeats = new Set<number>();
   private lastActionBySeat = new Map<number, string>();
   private revealedSeats = new Set<number>();
+  // seats that did ANYTHING this hand (fold/check/call/bet/raise/time bank) —
+  // the inactivity sit-out (1E.1) counts whole hands with nothing at all
+  private actedThisHand = new Set<number>();
 
   private deadBets = 0; // folded chips this round — poker-ts holds them outside pots() until the round ends
+  private runoutCards = 0; // board cards poker-ts dealt out at once when betting ended early (all-in)
   private turnStartedAt: number | null = null;
   private turnDeadlineAt: number | null = null;
   private pausedRemainingMs: number | null = null;
@@ -128,11 +132,17 @@ export class GameManager {
 
   toggleSitOut(playerId: string, out: boolean) {
     const p = this.players.get(playerId);
-    if (!p) return;
+    if (!p || p.sittingOut === out) return;
     p.sittingOut = out;
-    if (!out) p.consecutiveTimeouts = 0;
+    if (!out) { p.consecutiveTimeouts = 0; p.inactiveHands = 0; }
     this.pushLog(`${p.name} ${out ? "sits out" : "is back in"}`);
     // takes effect at next deal; current hand is unaffected (6.2)
+  }
+
+  /** May this seat voluntarily show its hand right now? Only once the hand is
+   *  over, for a dealt-in seat not already face-up (1E.7). */
+  canShow(seat: number): boolean {
+    return this.phase === "handEnded" && !!this.holeSnapshot[seat] && !this.revealedSeats.has(seat);
   }
 
   /** Rebuy: host-approved, applied only between hands (3.4). */
@@ -170,16 +180,16 @@ export class GameManager {
     this.pushLog(`${name} takes seat ${seat + 1} with ${fmt(amount)}`);
   }
 
-  /** Fold-win only: the winner may voluntarily show (9.1). */
+  /** Voluntary show once the hand is over (1E.7): the fold-win winner (9.1)
+   *  or any folded player may turn their cards face-up for the table. */
   voluntaryShow(seat: number) {
-    if (this.canShowSeat !== seat || !this.lastHandResult) return;
-    const cards = this.holeSnapshot[seat];
-    if (!cards) return;
+    if (!this.canShow(seat)) return;
+    const cards = this.holeSnapshot[seat]!;
     this.revealedSeats.add(seat);
-    const r = this.lastHandResult.find((x) => x.seat === seat);
+    const r = this.lastHandResult?.find((x) => x.seat === seat);
     if (r) r.cards = cards;
     this.pushLog(`${this.nameAt(seat)} shows ${cards.map(cardStr).join(" ")}`);
-    this.canShowSeat = null;
+    if (this.canShowSeat === seat) this.canShowSeat = null;
   }
 
   // ---------- the hand loop ----------
@@ -212,6 +222,8 @@ export class GameManager {
 
     this.handNumber += 1;
     this.deadBets = 0;
+    this.runoutCards = 0;
+    this.actedThisHand.clear();
     this.foldedSeats.clear();
     this.revealedSeats.clear();
     this.lastActionBySeat.clear();
@@ -235,35 +247,33 @@ export class GameManager {
     const seat = this.table.playerToAct();
     const p = this.playerAtSeat(seat);
     if (p) p.consecutiveTimeouts = 0; // a real action resets the streak (6.1)
+    this.actedThisHand.add(seat);
     this.applyAction(seat, action, amount);
   }
 
-  /** Called by the shell when the visible clock hits zero (5.3). */
+  /** Called by the shell when the visible clock hits zero (5.3). A timeout is
+   *  NOT activity: the sit-out rule is two whole hands with nothing at all (1E.1). */
   timeout() {
     if (this.phase !== "inHand") return;
     const seat = this.table.playerToAct();
     const legal: PlayerAction[] = this.table.legalActions().actions;
     const auto: PlayerAction = legal.includes("check") ? "check" : "fold";
     const p = this.playerAtSeat(seat);
-    if (p) {
-      p.consecutiveTimeouts += 1;
-      if (p.consecutiveTimeouts >= 2 && !p.sittingOut) {
-        p.sittingOut = true; // auto sit-out (6.1)
-        this.pushLog(`${p.name} auto sat out (2 timeouts in a row)`);
-      }
-    }
+    if (p) p.consecutiveTimeouts += 1;
     this.pushLog(`${this.nameAt(seat)} timed out — auto ${auto}`);
     this.applyAction(seat, auto, undefined);
   }
 
-  /** +30s once via time bank (5.2). Returns true if applied. */
+  /** +30s once via time bank (5.2). Returns true if applied. Counts as activity. */
   useTimeBank(): boolean {
     if (this.phase !== "inHand" || this.turnDeadlineAt == null) return false;
-    const p = this.playerAtSeat(this.table.playerToAct());
+    const seat = this.table.playerToAct();
+    const p = this.playerAtSeat(seat);
     if (!p || p.timeBank <= 0) return false;
     const grant = Math.min(p.timeBank, 30);
     p.timeBank -= grant;
     this.turnDeadlineAt += grant * 1000;
+    this.actedThisHand.add(seat);
     this.pushLog(`${p.name} uses time bank (+${grant}s)`);
     return true;
   }
@@ -295,11 +305,15 @@ export class GameManager {
     this.pushLog(`${this.nameAt(seat)}: ${label.toLowerCase()}`);
 
     if (!this.table.isBettingRoundInProgress()) {
+      const seenBefore = this.table.communityCards().length;
       this.table.endBettingRound();
       this.deadBets = 0; // poker-ts just swept dead bets into the pots
       if (this.table.areBettingRoundsCompleted()) {
         // snapshot BEFORE showdown — poker-ts forbids reads after
         this.boardSnapshot = this.table.communityCards().slice();
+        // all-in: poker-ts dealt the rest of the board in one go; the UI
+        // reveals those cards one at a time before the showdown
+        this.runoutCards = Math.max(0, this.boardSnapshot.length - seenBefore);
         this.finishByShowdown();
         return;
       }
@@ -320,6 +334,13 @@ export class GameManager {
     const stacksAfter = this.table
       .seats()
       .map((s: SeatShape | null) => (s ? s.totalChips : 0));
+    // poker-ts also ends a hand this way when everyone else FOLDED — its
+    // "showdown" then has no ranked winners. That is a fold-win: the survivor's
+    // cards stay hidden (they may choose to show) and the pot is reported.
+    if (!winners.some((pot) => pot.length > 0)) {
+      this.finishByFolds(stacksAfter);
+      return;
+    }
     const results: HandResultShare[] = [];
     for (const pot of winners) {
       for (const [seat, hand] of pot) {
@@ -343,8 +364,8 @@ export class GameManager {
     this.endHand(stacksAfter, results);
   }
 
-  private finishByFolds() {
-    const stacksAfter = this.table
+  private finishByFolds(stacksKnown?: number[]) {
+    const stacksAfter = stacksKnown ?? this.table
       .seats()
       .map((s: SeatShape | null) => (s ? s.totalChips : 0));
     const results: HandResultShare[] = [];
@@ -369,6 +390,16 @@ export class GameManager {
       // time bank refill: +5s per hand played, capped (5.2)
       if (this.wasDealtIn(p.seat)) {
         p.timeBank = Math.min(this.config.timeBankSec, p.timeBank + 5);
+        // inactivity sit-out (1E.1): a whole hand with no action of any kind
+        // counts one; any action resets; two in a row sits them out next deal
+        if (this.actedThisHand.has(p.seat)) p.inactiveHands = 0;
+        else {
+          p.inactiveHands = (p.inactiveHands ?? 0) + 1;
+          if (p.inactiveHands >= 2 && !p.sittingOut) {
+            p.sittingOut = true;
+            this.pushLog(`${p.name} sat out — no action for two hands`);
+          }
+        }
       }
     }
     this.lastHandResult = results;
@@ -441,7 +472,11 @@ export class GameManager {
       lastHandResult: this.lastHandResult,
       log: this.log.slice(-60),
       canShowSeat: this.canShowSeat,
+      showableSeats: this.phase === "handEnded"
+        ? seats.filter((v) => !v.empty && this.canShow(v.seat)).map((v) => v.seat)
+        : undefined,
       waitingReason: this.waitingReason,
+      runoutCards: this.phase === "handEnded" ? this.runoutCards : undefined,
     };
   }
 

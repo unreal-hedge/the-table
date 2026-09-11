@@ -20,7 +20,8 @@ export type ClientMessage =
   | { type: "join"; playerId: string; keyword: string }
   | { type: "act"; action: PlayerAction; amount?: number }
   | { type: "timeBank" }               // +30s, actor only — server-verified (spec 5.2)
-  | { type: "show" }                   // voluntary show after a fold-win (spec 9.1)
+  | { type: "show" }                   // voluntary show once the hand is over (fold-win winner or a folded player, 1E.7)
+  | { type: "sitToggle"; out: boolean } // a seated player sits out / comes back on their own (1E.1)
   | { type: "chat"; text: string }
   // ---- DFT simultaneous phases (Step 6b) ----
   // Both carry ONLY the payload — the acting seat is derived server-side from
