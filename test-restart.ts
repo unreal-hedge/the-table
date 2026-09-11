@@ -24,6 +24,7 @@ class Bot {
   seat: number | null = null;
   ended = false;
   sawReset = false;
+  arjunDealtAfterReset = false; // arjun was in a hand in the FRESH session
   maxHand = 0;
   private prevHand = 0;
   private q: ClientMessage[] = [];
@@ -43,6 +44,7 @@ class Bot {
       this.latest = s;
       this.maxHand = Math.max(this.maxHand, s.handNumber);
       if (this.prevHand > 1 && s.handNumber === 1) this.sawReset = true; // fresh session
+      if (this.sawReset && s.seats.some((x) => x.id === "arjun" && x.inHand)) this.arjunDealtAfterReset = true;
       this.prevHand = s.handNumber;
       this.seat = s.seats.find((x) => x.id === this.id && !x.empty)?.seat ?? null;
       // fold-drive so hands turn over fast (no busting)
@@ -76,8 +78,24 @@ async function main() {
   const before = kabir.maxHand;
   check("played multiple hands before restart", before >= 2, `maxHand=${before}`);
 
+  // KABIR-TODO #7: a player the clock sat out must NOT carry that flag into the
+  // fresh session — restart re-seats the crew with fresh records.
+  kabir.send({ type: "host", cmd: { kind: "sitOut", playerId: "arjun", out: true } });
+  await wait(1500);
+  const arjunOutBefore = kabir.latest?.seats.find((x) => x.id === "arjun")?.sittingOut === true;
+  check("arjun is sitting out before the restart", arjunOutBefore);
+
   kabir.send({ type: "host", cmd: { kind: "restart" } });
   await wait(3000);
+
+  const arjunAfter = kabir.latest?.seats.find((x) => x.id === "arjun");
+  check("after restart arjun is NOT sitting out (flag does not survive)", arjunAfter?.sittingOut === false,
+    `sittingOut=${String(arjunAfter?.sittingOut)}`);
+  check("after restart arjun is dealt into a hand of the fresh session", kabir.arjunDealtAfterReset || arjun.arjunDealtAfterReset);
+  // log spam (KABIR-TODO #3): the parked-table line must never repeat back-to-back
+  const log = kabir.latest?.log ?? [];
+  const repeats = log.filter((l, i) => i > 0 && l === log[i - 1] && l.startsWith("Waiting for")).length;
+  check("no back-to-back 'Waiting for…' log repeats", repeats === 0, `repeats=${repeats}`);
 
   check("restart broadcast an 'ended' summary (session settled)", kabir.ended && arjun.ended);
   check("a fresh session started (hand # reset to 1)", kabir.sawReset || arjun.sawReset);

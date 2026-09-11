@@ -200,8 +200,11 @@ export class GameManager {
     );
     if (eligible.length < 2) {
       this.phase = "handEnded";
-      this.waitingReason = "Waiting for at least 2 players with chips";
-      this.pushLog(this.waitingReason);
+      const reason = "Waiting for at least 2 players with chips";
+      // Log once, on change: the server re-tries the deal after every mutation
+      // while the table is parked, which used to append this line each time.
+      if (this.waitingReason !== reason) this.pushLog(reason);
+      this.waitingReason = reason;
       return;
     }
     this.waitingReason = null;
