@@ -176,14 +176,14 @@ export function TableView({
             <div className="dft-board">
               <span className="dft-board-tag">Board A</span>
               <div className="dft-cards">
-                {s.dft.boards.a.map((c, i) => <CardFace key={`a${i}`} card={c} small />)}
+                {s.dft.boards.a.map((c, i) => <CardFace key={`a${i}`} card={c} size="md" />)}
               </div>
             </div>
             {s.totalPot > 0 && <div className="pot-line dft-pot">POT {fmt(s.totalPot)}</div>}
             <div className="dft-board">
               <span className="dft-board-tag">Board B</span>
               <div className="dft-cards">
-                {s.dft.boards.b.map((c, i) => <CardFace key={`b${i}`} card={c} small />)}
+                {s.dft.boards.b.map((c, i) => <CardFace key={`b${i}`} card={c} size="md" />)}
               </div>
             </div>
           </div>

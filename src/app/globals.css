@@ -1,22 +1,37 @@
 :root { --font-display: "Bricolage Grotesque"; --font-body: "IBM Plex Sans"; --font-mono: "IBM Plex Mono"; }
-/* ============ TOKENS ============ */
+/* ============ TOKENS ============
+   The room is a dark lounge; the table is CLARET felt (1E.9) under a walnut
+   rail with a gold pinstripe; cards are cream with four-colour suits. Gold is
+   the money colour, green is "your move / you won", claret is the table. */
 :root {
-  --room: #0e1210;
-  --room-2: #141b17;
-  --felt: #1c4a38;
-  --felt-deep: #123125;
-  --rail: #33261b;
-  --rail-2: #241a12;
-  --line: rgba(242, 236, 221, 0.1);
-  --text: #f2ecdd;
-  --muted: #7e8c82;
-  --gold: #d9a441;
+  --room: #0f0d0e;
+  --room-2: #1a1416;
+  --felt: #8d1f2c;
+  --felt-mid: #6e1522;
+  --felt-deep: #3f0a12;
+  --rail: #2f1d13;
+  --rail-2: #1c110b;
+  --rail-line: #b88a3e;
+  --line: rgba(242, 236, 221, 0.11);
+  --text: #f4eee0;
+  --muted: #9a8f86;
+  --gold: #e0b054;
+  --gold-deep: #b98a33;
   --glow: #5be08a;
   --danger: #e0645b;
-  --card-face: #f7f2e6;
-  --card-red: #c8443c;
-  --card-black: #23281f;
-  --plate: rgba(10, 14, 12, 0.82);
+  --board-a: #f0b64a;   /* Board A / Hand A accent (amber) */
+  --board-b: #5cc4ff;   /* Board B / Hand B accent (sky) */
+  --tex: #f4eee0;       /* Tex accent (cream) */
+  --card-face: #f9f4e8;
+  --card-face-2: #efe6d3;
+  --card-edge: rgba(60, 40, 20, 0.22);
+  --suit-spades: #1c1c1e;
+  --suit-hearts: #c9302c;
+  --suit-diamonds: #1e63d6;
+  --suit-clubs: #1d7a3e;
+  --back: #1f3f6d;
+  --back-2: #10213c;
+  --plate: rgba(12, 9, 10, 0.84);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -54,12 +69,6 @@ input { font: inherit; color: var(--text); }
 .player-row input[type="text"] { flex: 2; }
 .player-row input.buyin { flex: 1; }
 .player-row input.keyword { flex: 1.4; font-family: var(--font-mono), monospace; }
-.cohost-toggle {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; color: var(--muted); text-transform: uppercase;
-  letter-spacing: 0.08em; cursor: pointer; white-space: nowrap;
-}
-.cohost-toggle input { accent-color: var(--glow); cursor: pointer; }
 .player-row input {
   background: rgba(242, 236, 221, 0.05); border: 1px solid var(--line);
   border-radius: 8px; padding: 9px 11px;
@@ -112,14 +121,14 @@ input { font: inherit; color: var(--text); }
 .conn-pill.ok .dot { background: var(--glow); box-shadow: 0 0 6px rgba(91, 224, 138, 0.7); }
 .conn-pill.warn .dot { background: var(--gold); animation: connPulse 1s ease infinite; }
 .conn-pill.bad .dot { background: var(--danger); animation: connPulse 0.6s ease infinite; }
-.conn-pill.warn { border-color: rgba(217, 164, 65, 0.45); }
+.conn-pill.warn { border-color: rgba(224, 176, 84, 0.45); }
 .conn-pill.bad { border-color: rgba(224, 100, 91, 0.55); color: var(--danger); }
 @keyframes connPulse { 50% { opacity: 0.3; } }
 .room-line {
   font-size: 12px; color: var(--muted); background: var(--plate);
   padding: 3px 10px; border-radius: 12px; border: 1px solid var(--line);
 }
-.spectate-note { color: var(--gold); border-color: rgba(217, 164, 65, 0.4); }
+.spectate-note { color: var(--gold); border-color: rgba(224, 176, 84, 0.4); }
 .err-toast {
   position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
   background: rgba(224, 100, 91, 0.14); border: 1px solid rgba(224, 100, 91, 0.5);
@@ -134,23 +143,28 @@ input { font: inherit; color: var(--text); }
   transform: translate(-50%, -50%);
   width: min(72vw, 1050px); aspect-ratio: 1.9;
 }
+/* The felt: claret, lit from above-centre, vignetted to the rail, with a fine
+   linen weave. The rail is walnut with a gold pinstripe. */
 .felt {
   position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(75% 75% at 50% 38%, var(--felt), var(--felt-deep) 85%);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.022) 0 2px, transparent 2px 5px),
+    radial-gradient(70% 70% at 50% 36%, var(--felt) 0%, var(--felt-mid) 58%, var(--felt-deep) 100%);
   border: 14px solid var(--rail);
   box-shadow:
-    inset 0 0 60px rgba(0, 0, 0, 0.55),
-    0 30px 80px rgba(0, 0, 0, 0.6),
-    0 0 0 2px var(--rail-2);
+    inset 0 0 70px rgba(0, 0, 0, 0.6),
+    0 30px 80px rgba(0, 0, 0, 0.65),
+    0 0 0 2px var(--rail-2),
+    0 0 0 3px rgba(184, 138, 62, 0.35);
 }
 .felt::after {
-  content: ""; position: absolute; inset: 22px; border-radius: 50%;
-  border: 1.5px solid rgba(242, 236, 221, 0.13);
+  content: ""; position: absolute; inset: 20px; border-radius: 50%;
+  border: 1.5px solid rgba(224, 176, 84, 0.22);
 }
 .table-brand {
   position: absolute; left: 50%; top: 26%; transform: translateX(-50%);
   font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 26px;
-  color: rgba(242, 236, 221, 0.1); letter-spacing: 0.24em; text-transform: uppercase;
+  color: rgba(244, 238, 224, 0.1); letter-spacing: 0.24em; text-transform: uppercase;
   pointer-events: none;
 }
 .board { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%);
@@ -165,7 +179,7 @@ input { font: inherit; color: var(--text); }
 .dft-board-tag {
   font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
 }
-.dft-cards { display: flex; gap: 6px; min-height: 57px; }
+.dft-cards { display: flex; gap: 6px; min-height: 60px; }
 /* DFT pot sits in the flow between the two boards. Scoped under .dft-boards to
    outspecify .pot-line's absolute placement (which is defined later in file). */
 .dft-boards .dft-pot { position: static; transform: none; margin: 2px 0; }
@@ -175,12 +189,12 @@ input { font: inherit; color: var(--text); }
   position: absolute; left: 50%; top: 66%; transform: translateX(-50%);
   font-family: var(--font-mono), monospace; font-size: 22px; font-weight: 700;
   letter-spacing: 0.03em; color: var(--gold);
-  background: rgba(10, 14, 12, 0.68); padding: 6px 20px; border-radius: 22px;
-  border: 1px solid rgba(217, 164, 65, 0.5); white-space: nowrap;
+  background: rgba(20, 8, 10, 0.72); padding: 6px 20px; border-radius: 22px;
+  border: 1px solid rgba(224, 176, 84, 0.5); white-space: nowrap;
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
 }
 .round-tag { position: absolute; left: 50%; top: 34.5%; transform: translateX(-50%);
-  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(244, 238, 224, 0.55); }
 
 /* Why the table can't deal (item 1) — a prominent, non-blocking banner so the
    table is never silently frozen. Sits over the felt; players/spectators still
@@ -189,8 +203,8 @@ input { font: inherit; color: var(--text); }
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   z-index: 12; text-align: center; max-width: 78%;
   font-family: var(--font-display), sans-serif; font-size: 18px; font-weight: 600;
-  color: var(--gold); background: rgba(10, 14, 12, 0.82);
-  padding: 14px 26px; border-radius: 14px; border: 1px solid rgba(217, 164, 65, 0.45);
+  color: var(--gold); background: var(--plate);
+  padding: 14px 26px; border-radius: 14px; border: 1px solid rgba(224, 176, 84, 0.45);
 }
 
 /* ============ DFT PICKING (hand-split screen) ============ */
@@ -199,10 +213,10 @@ input { font: inherit; color: var(--text); }
 .dft-pick {
   position: absolute; inset: 0; z-index: 16;
   display: flex; overflow-y: auto; padding: 16px;
-  background: rgba(6, 9, 8, 0.74); backdrop-filter: blur(3px);
+  background: rgba(8, 6, 7, 0.74); backdrop-filter: blur(3px);
 }
 .dft-pick-card {
-  margin: auto; width: 100%; max-width: 360px;
+  margin: auto; width: 100%; max-width: 380px;
   background: linear-gradient(180deg, var(--room-2), var(--room));
   border: 1px solid var(--line); border-radius: 18px;
   padding: 22px 18px 18px; text-align: center;
@@ -231,7 +245,7 @@ input { font: inherit; color: var(--text); }
 .dft-decide {
   position: absolute; inset: 0; z-index: 16;
   display: flex; overflow-y: auto; padding: 16px;
-  background: rgba(6, 9, 8, 0.74); backdrop-filter: blur(3px);
+  background: rgba(8, 6, 7, 0.74); backdrop-filter: blur(3px);
 }
 .dft-decide-card {
   margin: auto; width: 100%; max-width: 340px;
@@ -249,7 +263,7 @@ input { font: inherit; color: var(--text); }
   display: flex; flex-direction: column; gap: 5px;
 }
 .dft-decide-banked { background: rgba(91, 224, 138, 0.08); border-color: rgba(91, 224, 138, 0.28); }
-.dft-decide-contested { background: rgba(217, 164, 65, 0.08); border-color: rgba(217, 164, 65, 0.28); }
+.dft-decide-contested { background: rgba(224, 176, 84, 0.08); border-color: rgba(224, 176, 84, 0.28); }
 .dft-decide-stakes span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .dft-decide-stakes strong { font-family: var(--font-mono), monospace; font-size: 20px; color: var(--text); }
 .dft-decide .primary-btn { width: 100%; }
@@ -266,10 +280,10 @@ input { font: inherit; color: var(--text); }
 .dft-reveal {
   position: absolute; inset: 0; z-index: 16;
   display: flex; overflow-y: auto; padding: 16px;
-  background: rgba(6, 9, 8, 0.8); backdrop-filter: blur(4px);
+  background: rgba(8, 6, 7, 0.8); backdrop-filter: blur(4px);
 }
 .dft-reveal-card {
-  margin: auto; width: 100%; max-width: 360px;
+  margin: auto; width: 100%; max-width: 380px;
   background: linear-gradient(180deg, var(--room-2), var(--room));
   border: 1px solid var(--line); border-radius: 18px;
   padding: 20px 18px; text-align: center;
@@ -307,35 +321,64 @@ input { font: inherit; color: var(--text); }
 .dft-reveal-result span { color: var(--text); }
 .dft-reveal-result strong { font-family: var(--font-mono), monospace; color: var(--glow); }
 
-/* ============ CARDS ============ */
+/* ============ CARDS ============
+   One renderer, one width variable. Everything scales from --w:
+     rank      = 0.42 w   (corner index, display font, heavy)
+     small pip = 0.30 w   (under the rank)
+     big pip   = 0.66 w   (the suit you can read from across the room)
+   Sizes: xs 36 · sm 44 · md 56 · lg 68 (phones: 30 · 38 · 48 · 60). */
 .card {
-  width: 52px; height: 74px; border-radius: 7px; position: relative;
-  background: var(--card-face); color: var(--card-black);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
-  display: flex; flex-direction: column; justify-content: space-between;
-  padding: 5px 6px; font-family: var(--font-mono), monospace; font-weight: 600;
-  animation: cardIn 0.25s ease both;
+  --w: 56px;
+  width: var(--w); height: calc(var(--w) * 1.42);
+  border-radius: calc(var(--w) * 0.11); position: relative; flex-shrink: 0;
+  background: linear-gradient(160deg, var(--card-face) 0%, var(--card-face-2) 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 0 0 1px var(--card-edge), 0 4px 12px rgba(0, 0, 0, 0.45);
+  color: var(--suit-spades);
+  font-family: var(--font-display), sans-serif; font-weight: 700;
+  animation: cardIn 0.28s ease both;
+  user-select: none; overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.3s ease;
 }
-.card.red { color: var(--card-red); }
-.card .rank { font-size: 19px; line-height: 1; }
-.card .pip { font-size: 17px; align-self: flex-end; line-height: 1; }
+.card.xs { --w: 36px; }
+.card.sm { --w: 44px; }
+.card.md { --w: 56px; }
+.card.lg { --w: 68px; }
+.card.s-hearts   { color: var(--suit-hearts); }
+.card.s-diamonds { color: var(--suit-diamonds); }
+.card.s-clubs    { color: var(--suit-clubs); }
+.card.s-spades   { color: var(--suit-spades); }
+.card-index {
+  position: absolute; top: calc(var(--w) * 0.07); left: calc(var(--w) * 0.1);
+  display: flex; flex-direction: column; align-items: center; line-height: 1;
+}
+.card .rank { font-size: calc(var(--w) * 0.42); letter-spacing: -0.03em; }
+.card .pip-sm { font-size: calc(var(--w) * 0.3); margin-top: calc(var(--w) * 0.02); }
+.card .pip-big {
+  position: absolute; right: calc(var(--w) * 0.07); bottom: calc(var(--w) * 0.02);
+  font-size: calc(var(--w) * 0.7); line-height: 1;
+}
 .card.back {
-  background: linear-gradient(135deg, #1e4a68, #16364c);
-  border: 2px solid rgba(242, 236, 221, 0.85);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.09) 0 3px, transparent 3px 8px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.09) 0 3px, transparent 3px 8px),
+    linear-gradient(135deg, var(--back), var(--back-2));
+  border: calc(var(--w) * 0.06) solid var(--card-face);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 .card.back::after {
-  content: ""; position: absolute; inset: 5px; border-radius: 4px;
-  border: 1px solid rgba(242, 236, 221, 0.35);
-  background: repeating-linear-gradient(45deg, transparent 0 4px, rgba(242,236,221,0.12) 4px 5px);
+  content: ""; position: absolute; inset: calc(var(--w) * 0.06); border-radius: calc(var(--w) * 0.06);
+  border: 1px solid rgba(244, 238, 224, 0.4);
 }
-.card.sm { width: 40px; height: 57px; border-radius: 5px; padding: 4px 5px; }
-.card.sm .rank { font-size: 15px; }
-.card.sm .pip { font-size: 13px; }
+.card.dim { opacity: 0.38; filter: saturate(0.6); }
+.card.lift {
+  transform: translateY(calc(var(--w) * -0.16));
+  box-shadow: 0 0 0 2.5px var(--gold), 0 12px 26px rgba(0, 0, 0, 0.55), 0 0 22px rgba(224, 176, 84, 0.45);
+}
 @keyframes cardIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; } }
 
 /* ============ SEATS ============ */
 .seat { position: absolute; transform: translate(-50%, -50%); width: 148px; text-align: center; }
-.seat-cards { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 5px; min-height: 57px; }
+.seat-cards { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 5px; min-height: 52px; }
 .plate {
   position: relative; background: var(--plate); border: 1px solid var(--line);
   border-radius: 11px; padding: 7px 10px 8px; backdrop-filter: blur(4px);
@@ -355,14 +398,14 @@ input { font: inherit; color: var(--text); }
 
 /* Empty numbered seat + spectator "tap to sit" (item 2). */
 .seat.empty .empty-plate {
-  border: 1px dashed var(--line); border-radius: 10px; padding: 12px 8px;
-  color: var(--muted); background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(244, 238, 224, 0.22); border-radius: 10px; padding: 12px 8px;
+  color: rgba(244, 238, 224, 0.55); background: rgba(0, 0, 0, 0.18);
 }
 .seat.empty .seat-num { font-size: 12px; letter-spacing: 0.06em; }
 .seat.empty .sit-hint { font-size: 11px; color: var(--gold); margin-top: 3px; }
 .seat.empty.requestable { cursor: pointer; }
-.seat.empty.requestable .empty-plate { border-color: rgba(217, 164, 65, 0.5); }
-.seat.empty.requestable:hover .empty-plate { border-color: var(--gold); background: rgba(217, 164, 65, 0.08); }
+.seat.empty.requestable .empty-plate { border-color: rgba(224, 176, 84, 0.5); }
+.seat.empty.requestable:hover .empty-plate { border-color: var(--gold); background: rgba(224, 176, 84, 0.1); }
 
 .timer-track { height: 3px; border-radius: 2px; background: rgba(242, 236, 221, 0.12);
   margin-top: 6px; overflow: hidden; }
@@ -380,14 +423,14 @@ input { font: inherit; color: var(--text); }
 @keyframes badgeIn { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .dealer-chip {
   position: absolute; width: 22px; height: 22px; border-radius: 50%;
-  background: var(--card-face); color: var(--card-black);
+  background: var(--card-face); color: var(--suit-spades);
   font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 600;
   display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0,0,0,0.5);
 }
 .bet-chip {
   position: absolute; transform: translate(-50%, -50%);
   font-family: var(--font-mono), monospace; font-size: 13px; font-weight: 600; color: var(--text);
-  background: rgba(217, 164, 65, 0.16); border: 1px solid rgba(217, 164, 65, 0.5);
+  background: rgba(20, 8, 10, 0.55); border: 1px solid rgba(224, 176, 84, 0.55);
   padding: 2px 9px; border-radius: 12px; white-space: nowrap;
 }
 .peek-btn { font-size: 10px; color: var(--muted); margin-top: 4px; text-decoration: underline; }
@@ -398,7 +441,7 @@ input { font: inherit; color: var(--text); }
   position: absolute; bottom: 0; left: 0; right: 0;
   display: flex; align-items: stretch; gap: 12px;
   padding: 14px 18px 18px;
-  background: linear-gradient(transparent, rgba(8, 11, 9, 0.92) 32%);
+  background: linear-gradient(transparent, rgba(10, 7, 8, 0.92) 32%);
 }
 .ab-left, .ab-right { display: flex; gap: 9px; align-items: stretch; }
 .ab-center { flex: 1; min-width: 0; }
@@ -421,7 +464,7 @@ input { font: inherit; color: var(--text); }
 .presets button { flex: 1; font-size: 11px; padding: 4px; border: 1px solid var(--line);
   border-radius: 6px; color: var(--muted); }
 .presets button:hover { color: var(--text); border-color: var(--muted); }
-.timebank-btn { font-size: 12px; color: var(--gold); border: 1px solid rgba(217,164,65,0.4);
+.timebank-btn { font-size: 12px; color: var(--gold); border: 1px solid rgba(224,176,84,0.4);
   border-radius: 8px; padding: 0 12px; }
 .timebank-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
@@ -440,7 +483,7 @@ input { font: inherit; color: var(--text); }
 
 .panel {
   position: absolute; top: 0; right: 0; bottom: 0; width: min(400px, 92vw);
-  background: rgba(10, 14, 12, 0.96); border-left: 1px solid var(--line);
+  background: rgba(12, 9, 10, 0.96); border-left: 1px solid var(--line);
   padding: 24px; z-index: 20; overflow-y: auto; backdrop-filter: blur(8px);
 }
 .panel h3 { font-family: var(--font-display), sans-serif; font-size: 21px; margin-bottom: 16px; }
@@ -475,7 +518,7 @@ input { font: inherit; color: var(--text); }
   position: absolute; bottom: 118px; left: 16px; z-index: 25;
   width: min(340px, calc(100vw - 32px)); max-height: 46vh;
   display: flex; flex-direction: column;
-  background: rgba(10, 14, 12, 0.96); border: 1px solid var(--line);
+  background: rgba(12, 9, 10, 0.96); border: 1px solid var(--line);
   border-radius: 14px; backdrop-filter: blur(8px); overflow: hidden;
 }
 .chat-head {
@@ -501,7 +544,7 @@ input { font: inherit; color: var(--text); }
   position: absolute; bottom: calc(100% + 4px); left: 50%;
   transform: translateX(-50%); z-index: 8;
   max-width: 190px; padding: 6px 11px; border-radius: 12px;
-  background: var(--card-face); color: var(--card-black);
+  background: var(--card-face); color: var(--suit-spades);
   font-size: 12.5px; line-height: 1.35; text-align: left;
   overflow-wrap: anywhere; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   animation: bubbleIn 0.18s ease both; pointer-events: none;
@@ -515,91 +558,13 @@ input { font: inherit; color: var(--text); }
 
 /* pause veil + end screen */
 .veil { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center;
-  background: rgba(8, 11, 9, 0.72); backdrop-filter: blur(3px); }
+  background: rgba(10, 7, 8, 0.72); backdrop-filter: blur(3px); }
 .veil .msg { font-family: var(--font-display), sans-serif; font-size: 34px; font-weight: 700; text-align: center; }
 .veil .hint { color: var(--muted); margin-top: 8px; text-align: center; }
 .veil .primary-btn { width: auto; padding: 13px 44px; margin: 22px auto 0; display: block; }
 .end-wrap { height: 100vh; display: grid; place-items: center; overflow: auto; }
 .end-card { width: min(560px, 92vw); padding: 40px; }
 .end-card h1 { font-family: var(--font-display), sans-serif; font-size: 40px; margin-bottom: 4px; }
-
-/* ============ MOBILE (≤640px) — phones, portrait-first ============ */
-/* dvh: keeps the action bar above Safari's collapsing address bar */
-.scene, .lobby, .end-wrap { height: 100vh; height: 100dvh; }
-
-@media (max-width: 640px) {
-  /* --- table: portrait oval to match the %-based seat ring --- */
-  .table-wrap { width: 88vw; aspect-ratio: 0.78; top: 41%; }
-  .felt { border-width: 9px; }
-  .felt::after { inset: 12px; }
-  .table-brand { font-size: 14px; letter-spacing: 0.16em; top: 28%; }
-  .round-tag { top: 35%; font-size: 9px; }
-  .pot-line { font-size: 17px; font-weight: 700; padding: 4px 14px; }
-
-  /* --- cards: smaller, board fits inside the narrow oval --- */
-  .card { width: 38px; height: 54px; border-radius: 5px; padding: 4px 5px; }
-  .card .rank { font-size: 14px; }
-  .card .pip { font-size: 12px; }
-  .card.sm { width: 30px; height: 43px; border-radius: 4px; padding: 3px 4px; }
-  .card.sm .rank { font-size: 11px; }
-  .card.sm .pip { font-size: 10px; }
-  .board { gap: 4px; }
-  .seat-cards { min-height: 43px; margin-bottom: 3px; }
-
-  /* --- seats: narrower plates, readable at arm's length --- */
-  .seat { width: 104px; }
-  .plate { padding: 5px 7px 6px; border-radius: 9px; }
-  .plate .name { font-size: 12px; }
-  .plate .stack { font-size: 14px; font-weight: 700; }
-  .badge { font-size: 9px; padding: 2px 7px; top: -10px; }
-  .bet-chip { font-size: 12px; padding: 2px 7px; }
-  .dealer-chip { width: 18px; height: 18px; font-size: 9px; }
-
-  /* --- corners: compact chrome --- */
-  .title-corner { font-size: 15px; top: 12px; left: 14px; }
-  .blind-corner { font-size: 10px; top: 34px; left: 15px; }
-  .net-corner { top: 56px; left: 15px; gap: 4px; }
-  .conn-pill { font-size: 10px; padding: 3px 9px; }
-  .room-line { font-size: 10px; }
-  .err-toast { bottom: 190px; width: max-content; max-width: 90vw; font-size: 12px; }
-  .chat-fab { bottom: 200px; left: 10px; width: 42px; height: 42px; font-size: 17px; }
-  .chat-panel { bottom: 200px; left: 10px; max-height: 38vh; }
-  .chat-bubble { max-width: 150px; font-size: 11.5px; }
-
-  /* --- lobby/setup form: rows wrap instead of crushing --- */
-  .lobby-card { padding: 26px 18px; }
-  .lobby h1 { font-size: 38px; }
-  .player-row { flex-wrap: wrap; row-gap: 6px; }
-  .player-row input[type="text"]:first-child { flex: 1 1 100%; }
-  .panel { width: 100vw; padding: 20px 16px; }
-}
-
-/* Action bar stacks below 1000px — the single-row bar crushes the log
-   strip on anything narrower than a full laptop. display:contents
-   dissolves the desktop groupings so the pieces reflow as rows;
-   no component changes needed. */
-@media (max-width: 1000px) {
-  .action-bar { flex-wrap: wrap; gap: 8px; padding: 10px 10px 18px; }
-  .ab-center { display: none; }          /* dealer log lives off small screens for now */
-  .ab-left, .ab-right { display: contents; }
-  .timebank-btn { order: 0; flex: 0 0 auto; min-height: 44px; padding: 0 10px; font-size: 11px; }
-  /* slider claims the whole first row minus the time-bank button,
-     so no action button can ever sneak up beside it */
-  .raise-box { order: 0; flex: 1 1 calc(100% - 84px); min-width: 0; }
-  .raise-box input[type="range"] { height: 34px; }
-  .presets button { min-height: 34px; font-size: 12px; }
-  .act-btn {
-    /* basis 21%: four buttons can never fit beside the slider row,
-       so they always wrap into their own full-width row */
-    order: 1; flex: 1 1 21%; min-width: 0; min-height: 52px;
-    padding: 8px 4px; font-size: 13px; border-radius: 9px;
-  }
-  .act-btn .amt { font-size: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}
 
 /* ============ MENU CLUSTER + SHEET (KABIR-TODO #1, #2) ============ */
 /* One top-right cluster replaces the 7-button admin column: a pulsing
@@ -613,15 +578,15 @@ input { font: inherit; color: var(--text); }
   transition: border-color 0.15s ease;
 }
 .menu-pill:hover { border-color: var(--muted); }
-.menu-pill.alert { color: var(--gold); border-color: rgba(217, 164, 65, 0.55); animation: pillPulse 1.6s ease infinite; }
+.menu-pill.alert { color: var(--gold); border-color: rgba(224, 176, 84, 0.55); animation: pillPulse 1.6s ease infinite; }
 .menu-pill.alert b { background: var(--gold); color: #1a1408; border-radius: 10px; padding: 0 7px; font-size: 12px; }
-@keyframes pillPulse { 50% { box-shadow: 0 0 0 5px rgba(217, 164, 65, 0.16); } }
-.sheet-veil { position: absolute; inset: 0; z-index: 30; background: rgba(6, 9, 8, 0.45); }
+@keyframes pillPulse { 50% { box-shadow: 0 0 0 5px rgba(224, 176, 84, 0.16); } }
+.sheet-veil { position: absolute; inset: 0; z-index: 30; background: rgba(8, 6, 7, 0.45); }
 .sheet {
   position: absolute; top: 14px; right: 14px;
   width: min(360px, calc(100vw - 28px)); max-height: min(70dvh, 560px);
   display: flex; flex-direction: column;
-  background: rgba(10, 14, 12, 0.97); border: 1px solid var(--line); border-radius: 16px;
+  background: rgba(12, 9, 10, 0.97); border: 1px solid var(--line); border-radius: 16px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); overflow: hidden;
   animation: sheetIn 0.18s ease both;
 }
@@ -656,7 +621,7 @@ input { font: inherit; color: var(--text); }
 /* ============ DIALOG (KABIR-TODO #6) ============ */
 .dialog-veil {
   position: absolute; inset: 0; z-index: 40; display: grid; place-items: center;
-  background: rgba(6, 9, 8, 0.62); backdrop-filter: blur(3px); padding: 16px;
+  background: rgba(8, 6, 7, 0.62); backdrop-filter: blur(3px); padding: 16px;
 }
 .dialog-card {
   width: min(360px, 100%);
@@ -683,14 +648,90 @@ input { font: inherit; color: var(--text); }
 /* spectators: no action bar (#4) — a slim dealer-log strip only, desktop */
 .spectator-strip {
   position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 18px 16px;
-  background: linear-gradient(transparent, rgba(8, 11, 9, 0.92) 32%);
+  background: linear-gradient(transparent, rgba(10, 7, 8, 0.92) 32%);
 }
 .spectator-strip .log-strip { max-height: 72px; }
 .show-btn { position: absolute; bottom: 130px; right: 16px; z-index: 20; }
-@media (max-width: 1000px) { .spectator-strip { display: none; } }
+
+/* ============ MOBILE (≤640px) — phones, portrait-first ============ */
+/* dvh: keeps the action bar above Safari's collapsing address bar */
+.scene, .lobby, .end-wrap { height: 100vh; height: 100dvh; }
+
 @media (max-width: 640px) {
+  /* --- table: portrait oval to match the %-based seat ring --- */
+  .table-wrap { width: 88vw; aspect-ratio: 0.78; top: 41%; }
+  .felt { border-width: 9px; }
+  .felt::after { inset: 12px; }
+  .table-brand { font-size: 14px; letter-spacing: 0.16em; top: 28%; }
+  .round-tag { top: 35%; font-size: 9px; }
+  .pot-line { font-size: 17px; font-weight: 700; padding: 4px 14px; }
+
+  /* --- cards: one notch smaller, still readable at arm's length --- */
+  .card.xs { --w: 30px; }
+  .card.sm { --w: 38px; }
+  .card.md { --w: 48px; }
+  .card.lg { --w: 60px; }
+  .board { gap: 4px; }
+  .dft-cards { gap: 4px; min-height: 54px; }
+  .seat-cards { min-height: 43px; margin-bottom: 3px; }
+
+  /* --- seats: narrower plates, readable at arm's length --- */
+  .seat { width: 104px; }
+  .plate { padding: 5px 7px 6px; border-radius: 9px; }
+  .plate .name { font-size: 12px; }
+  .plate .stack { font-size: 14px; font-weight: 700; }
+  .badge { font-size: 9px; padding: 2px 7px; top: -10px; }
+  .bet-chip { font-size: 12px; padding: 2px 7px; }
+  .dealer-chip { width: 18px; height: 18px; font-size: 9px; }
+
+  /* --- corners: compact chrome --- */
+  .title-corner { font-size: 15px; top: 12px; left: 14px; }
+  .blind-corner { font-size: 10px; top: 34px; left: 15px; }
+  .net-corner { top: 56px; left: 15px; gap: 4px; }
+  .conn-pill { font-size: 10px; padding: 3px 9px; }
+  .room-line { font-size: 10px; }
   .sheet { top: 10px; right: 10px; left: 10px; width: auto; max-height: 62dvh; }
   .menu-cluster { top: 10px; right: 10px; gap: 6px; }
   .menu-pill { padding: 7px 11px; font-size: 12px; }
   .show-btn { bottom: 200px; }
+
+  .err-toast { bottom: 190px; width: max-content; max-width: 90vw; font-size: 12px; }
+  .chat-fab { bottom: 200px; left: 10px; width: 42px; height: 42px; font-size: 17px; }
+  .chat-panel { bottom: 200px; left: 10px; max-height: 38vh; }
+  .chat-bubble { max-width: 150px; font-size: 11.5px; }
+
+  /* --- lobby/setup form: rows wrap instead of crushing --- */
+  .lobby-card { padding: 26px 18px; }
+  .lobby h1 { font-size: 38px; }
+  .player-row { flex-wrap: wrap; row-gap: 6px; }
+  .player-row input[type="text"]:first-child { flex: 1 1 100%; }
+  .panel { width: 100vw; padding: 20px 16px; }
+}
+
+/* Action bar stacks below 1000px — the single-row bar crushes the log
+   strip on anything narrower than a full laptop. display:contents
+   dissolves the desktop groupings so the pieces reflow as rows;
+   no component changes needed. */
+@media (max-width: 1000px) {
+  .action-bar { flex-wrap: wrap; gap: 8px; padding: 10px 10px 18px; }
+  .ab-center { display: none; }          /* dealer log lives off small screens for now */
+  .spectator-strip { display: none; }
+  .ab-left, .ab-right { display: contents; }
+  .timebank-btn { order: 0; flex: 0 0 auto; min-height: 44px; padding: 0 10px; font-size: 11px; }
+  /* slider claims the whole first row minus the time-bank button,
+     so no action button can ever sneak up beside it */
+  .raise-box { order: 0; flex: 1 1 calc(100% - 84px); min-width: 0; }
+  .raise-box input[type="range"] { height: 34px; }
+  .presets button { min-height: 34px; font-size: 12px; }
+  .act-btn {
+    /* basis 21%: four buttons can never fit beside the slider row,
+       so they always wrap into their own full-width row */
+    order: 1; flex: 1 1 21%; min-width: 0; min-height: 52px;
+    padding: 8px 4px; font-size: 13px; border-radius: 9px;
+  }
+  .act-btn .amt { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
 }

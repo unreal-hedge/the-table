@@ -49,8 +49,8 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = 
           {/* online: server strips opponents' holeCards to null — still
               show backs, an in-hand player must LOOK in the hand */}
           {v.inHand && (v.holeCards
-            ? v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} small />)
-            : Array.from({ length: backCount }, (_, i) => <CardFace key={i} card={null} small />))}
+            ? v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} size="xs" />)
+            : Array.from({ length: backCount }, (_, i) => <CardFace key={i} card={null} size="xs" />))}
         </div>
         <div className="plate">
           {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
