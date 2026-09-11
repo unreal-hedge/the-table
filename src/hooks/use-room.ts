@@ -51,6 +51,7 @@ export interface RoomHandle {
     show: () => void;
     chat: (text: string) => void;
     host: (cmd: HostCommand) => void;
+    draftArrangement: (order: number[]) => void;        // DFT working split, any time until lock (2.4)
     submitArrangement: (order: number[]) => void;       // DFT picking (6b)
     declare: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
     requestSeat: (seat: number) => void;                // spectator asks for an empty seat (item 2)
@@ -165,6 +166,7 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
       show: () => post({ type: "show" }),
       chat: (text: string) => post({ type: "chat", text }),
       host: (cmd: HostCommand) => post({ type: "host", cmd }),
+      draftArrangement: (order: number[]) => post({ type: "draftArrangement", order }),
       submitArrangement: (order: number[]) => post({ type: "submitArrangement", order }),
       declare: (potIndex: number, decision: DftDecision) => post({ type: "declare", potIndex, decision }),
       requestSeat: (seat: number) => post({ type: "requestSeat", seat }),

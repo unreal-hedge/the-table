@@ -179,6 +179,7 @@ export class TableServer extends Server<Env> {
       case "timeBank":          return this.handleTimeBank(conn, playerId);
       case "show":              return this.handleShow(conn, playerId);
       case "chat":              return this.handleChat(conn, playerId, msg.text);
+      case "draftArrangement":  return this.handleDraftArrangement(conn, playerId, msg.order);
       case "submitArrangement": return this.handleSubmitArrangement(conn, playerId, msg.order);
       case "declare":           return this.handleDeclare(conn, playerId, msg.potIndex, msg.decision);
       case "requestSeat":       return this.handleRequestSeat(conn, playerId, msg.seat);
@@ -283,7 +284,6 @@ export class TableServer extends Server<Env> {
   private handleTimeBank(conn: Connection, playerId: string) {
     const g = this.gm;
     if (!g) return this.error(conn, "No game running");
-    if (!(g instanceof GameManager)) return this.error(conn, "No time bank in this mode");
     const seat = this.seatOf(playerId);
     // same rule as act: only the player on the clock can extend it
     if (seat == null || g.state().playerToAct !== seat) return this.error(conn, "Not your turn");
@@ -300,6 +300,31 @@ export class TableServer extends Server<Env> {
     if (seat == null || g.state().canShowSeat !== seat) return this.error(conn, "You can't show right now");
     g.voluntaryShow(seat);
     this.afterMutation();
+  }
+
+  /** DFT live rearranging (readability 2.4): this player's WORKING split, any
+   *  time from the deal until they lock. Stored engine-side so a picking
+   *  timeout locks what was on screen and a refresh restores it. The seat is
+   *  derived from the connection's identity. NEVER broadcast: nothing public
+   *  changed, the sender already knows their own split, and the filter would
+   *  strip it for every other viewer anyway — no opponent can ever learn how
+   *  a player has grouped their cards before the simultaneous reveal. */
+  private handleDraftArrangement(conn: Connection, playerId: string, order: number[]) {
+    const g = this.gm;
+    if (!g) return this.error(conn, "No game running");
+    if (!(g instanceof DoubleFlopManager)) return this.error(conn, "Not available in this mode");
+    if (this.isPaused()) return this.error(conn, "Game is paused");
+    const seat = this.seatOf(playerId);
+    if (seat == null) return this.error(conn, "You're not seated");
+    if (!Array.isArray(order) || order.length !== 6 || !order.every((n) => Number.isInteger(n))) {
+      return this.error(conn, "Bad arrangement");
+    }
+    try {
+      g.draftArrangement(seat, order);
+    } catch (e) {
+      console.error(`[TableServer] draftArrangement failed:`, e);
+      return this.error(conn, "Arrangement rejected");
+    }
   }
 
   /** DFT picking: lock this player's hand-split. The seat is derived from the

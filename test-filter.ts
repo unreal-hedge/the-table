@@ -222,6 +222,14 @@ function dftCheck(momentLabel: string, expect: {
 }
 
 dft.dealNextHand({ hole: new Map([[0, HOLE0], [1, HOLE1]]), boards: BOARDS });
+// Live rearranging (readability 2.4): from the deal, every dealt-in seat carries
+// a WORKING split — seat 0 rearranges during betting. It must be visible to
+// seat 0 only; seat 1 and the spectator must see nothing but backs.
+dft.draftArrangement(0, [5, 4, 3, 2, 1, 0]);
+dftCheck("betting-draft", { cardsHidden: true, declsPresent: false });
+if (JSON.stringify(filterStateFor(dft.state(), 0).seats[0].arrangement) !== JSON.stringify([5, 4, 3, 2, 1, 0])) {
+  fail("[betting-draft] seat 0 cannot see its own working split");
+}
 // drive betting: nobody bets, both check every round → reach picking
 let dftSafety = 0;
 while (dft.phase() === "betting" && dftSafety++ < 100) {
@@ -229,6 +237,11 @@ while (dft.phase() === "betting" && dftSafety++ < 100) {
   dft.act(legal.actions.includes("check") ? "check" : "call");
 }
 if (dft.phase() !== "picking") fail(`expected picking, got ${dft.phase()}`);
+// the picking phase opens on the draft, still hidden from everyone else
+if (JSON.stringify(dft.state().seats[0].arrangement) !== JSON.stringify([5, 4, 3, 2, 1, 0])) {
+  fail("picking did not open on seat 0's working split");
+}
+dftCheck("picking-draft", { cardsHidden: true, declsPresent: false });
 
 // seat 0 locks a NON-default split (within-pair swaps: same hands, different
 // order array) so the strip assertion isn't vacuous; seat 1 stays default.

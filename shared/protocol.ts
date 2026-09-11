@@ -26,7 +26,8 @@ export type ClientMessage =
   // Both carry ONLY the payload — the acting seat is derived server-side from
   // the connection's identity, NEVER trusted from the message. That's the whole
   // anti-cheat point: you can lock/declare for YOUR seat and no one else's.
-  | { type: "submitArrangement"; order: number[] }               // picking: lock my 6-card split (a permutation of 0..5)
+  | { type: "draftArrangement"; order: number[] }                // any time from the deal until I lock: my WORKING split (secret, never broadcast)
+  | { type: "submitArrangement"; order: number[] }               // picking: lock my 6-card split (a permutation of 0..5) — irreversible
   | { type: "declare"; potIndex: number; decision: DftDecision } // decisions: my blind run/surrender for one pot
   | { type: "requestSeat"; seat: number }                        // spectator asks an admin for an empty numbered seat (item 2)
   | { type: "requestChips"; amount: number }                     // seated player asks an admin for a rebuy/top-up (item 3)

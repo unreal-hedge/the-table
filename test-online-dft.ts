@@ -62,6 +62,9 @@ class Bot {
   sawDeclReveal = false;      // declarations ARE visible once the hand ends
   sawStrippedArr = false;     // an opponent LOCKED (public) yet their split stayed hidden — non-vacuous
   sawStrippedDecl = false;    // an opponent DECLARED (public) yet their choice stayed hidden — non-vacuous
+  sawOwnDraft = false;        // my betting-phase DRAFT came back to me (readability 2.4)
+  sawStrippedDraft = false;   // an opponent was dealt in (backs visible) yet no working split arrived — non-vacuous
+  private draftHand = -1;
   flipLeak = false;           // a flip result arrived BEFORE the hand ended (must never happen)
   sawFlipReveal = false;      // the flip log arrived at handEnded (for the reveal UI)
   order: number[];
@@ -144,6 +147,18 @@ class Bot {
     if (this.seat == null || s.variant !== "dft" || !s.dft) return;
     const seat = this.seat;
     if (s.dft.subPhase === "betting") {
+      // Live rearranging (2.4): kabir drafts a reversed split as soon as the hand
+      // is dealt; it must come back to kabir on a later state (own secret) and
+      // never reach arjun (an in-hand opponent with backs showing, split hidden).
+      if (this.id === "kabir" && this.draftHand !== s.handNumber) {
+        this.draftHand = s.handNumber;
+        this.send({ type: "draftArrangement", order: [5, 4, 3, 2, 1, 0] });
+      }
+      const me = s.seats.find((x) => x.seat === seat);
+      if (JSON.stringify(me?.arrangement) === JSON.stringify([5, 4, 3, 2, 1, 0])) this.sawOwnDraft = true;
+      for (const other of s.seats) {
+        if (other.seat !== seat && other.inHand && !other.revealed && other.arrangement == null) this.sawStrippedDraft = true;
+      }
       if (s.playerToAct !== seat || !s.legalActions) return;
       const la = s.legalActions;
       if (la.includes("check")) this.send({ type: "act", action: "check" });
@@ -255,6 +270,8 @@ async function main() {
       await wait(500);
       if (host.sawStrippedDecl || other.sawStrippedDecl) { await wait(6000); break; } // let that hand end + reveal
     }
+    check("a betting-phase draft split comes back to its owner (2.4)", host.sawOwnDraft);
+    check("an opponent's working split never arrives during betting (non-vacuous)", other.sawStrippedDraft && other.arrStripOk);
     check("reached the picking phase over the wire", host.sawPicking && other.sawPicking);
     check("each player sees their OWN locked split", host.sawOwnArrangement && other.sawOwnArrangement);
     check("WHO has locked a split is public (lockedSeats)", host.sawLockedPublic && other.sawLockedPublic);

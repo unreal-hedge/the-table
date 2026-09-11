@@ -66,9 +66,18 @@ export class DoubleFlopManager implements TableEngine {
   // this just surfaces turnStartedAt/turnDeadlineAt in the GameState snapshot)
   private turnStartedAt: number | null = null;
   private turnDeadlineAt: number | null = null;
-  // the submitted hand-split ORDER per seat (a permutation of 0..5), so a
-  // viewer can see their own lock; defaults to 0..5 (the pre-filled split)
+  // Each seat's WORKING hand-split order (a permutation of 0..5). Live from the
+  // deal: a player may rearrange as often as they like during betting and
+  // picking (readability 2.4); it freezes at the picking LOCK (irreversible)
+  // and a picking timeout locks whatever is here. Defaults to 0..5. SECRET —
+  // the filter strips other seats' orders until the simultaneous reveal.
   private arrangementOrder = new Map<number, number[]>();
+  // per-seat action badge for the current hand ("BET 400", "FOLD") — DFT's
+  // equivalent of NLHE's lastAction, so a viewer can follow the betting
+  private lastActionBySeat = new Map<number, string>();
+  // a hand that ended by folds keeps its boards at the depth reached — the
+  // unseen turn/river are never dealt out (no rabbit hunting)
+  private endedByFold = false;
 
   constructor(config: GameConfig, starters: DftStarter[], seed: number, resume?: PlayerRecord[]) {
     this.config = config;
@@ -157,6 +166,9 @@ export class DoubleFlopManager implements TableEngine {
 
     this.arrangements = new Map();
     this.arrangementOrder = new Map();
+    this.lastActionBySeat = new Map();
+    this.showdownSeats = [];
+    this.endedByFold = false;
     this.lockedPick = new Set();
     this.prepared = null;
     this.decisions = new Map();
@@ -198,7 +210,9 @@ export class DoubleFlopManager implements TableEngine {
     const actor = this.betting!.currentActor();
     const p = actor != null ? this.playerAtSeat(actor) : undefined;
     if (p) p.consecutiveTimeouts = 0; // a real action resets the timeout streak (6.1)
+    const legal = this.betting!.legal();
     this.betting!.act(action, amount);
+    if (actor != null) this.recordAction(actor, action, amount, legal.callAmount);
     this.pumpBetting();
   }
 
@@ -216,7 +230,54 @@ export class DoubleFlopManager implements TableEngine {
       if (p.consecutiveTimeouts >= 2 && !p.sittingOut) p.sittingOut = true;
     }
     this.betting!.act(auto);
+    this.pushLog(`${this.nameAt(seat)} timed out — auto ${auto}`);
+    this.recordAction(seat, auto, undefined, 0);
     this.pumpBetting();
+  }
+
+  /** +30s once via time bank (5.2), DFT betting turns only. Returns true if applied. */
+  useTimeBank(): boolean {
+    if (this.phaseVal !== "betting" || this.turnDeadlineAt == null) return false;
+    const actor = this.betting!.currentActor();
+    const p = actor != null ? this.playerAtSeat(actor) : undefined;
+    if (!p || p.timeBank <= 0) return false;
+    const grant = Math.min(p.timeBank, 30);
+    p.timeBank -= grant;
+    this.turnDeadlineAt += grant * 1000;
+    this.pushLog(`${p.name} uses time bank (+${grant}s)`);
+    return true;
+  }
+
+  /** Seat badge + dealer-log line for a betting action (mirrors NLHE's labels). */
+  private recordAction(seat: number, action: BetActionType, amount: number | undefined, callAmount: number): void {
+    const label =
+      action === "fold" ? "FOLD"
+      : action === "check" ? "CHECK"
+      : action === "call" ? `CALL ${fmt(callAmount)}`
+      : `${action.toUpperCase()} ${fmt(amount ?? 0)}`;
+    this.lastActionBySeat.set(seat, label);
+    this.pushLog(`${this.nameAt(seat)}: ${label.toLowerCase()}`);
+  }
+
+  private nameAt(seat: number): string {
+    return this.playerAtSeat(seat)?.name ?? `Seat ${seat + 1}`;
+  }
+
+  /** Live rearranging (readability 2.4): update this seat's WORKING split at
+   *  any time from the deal until it locks. Allowed during betting and picking
+   *  for a dealt-in, un-folded, un-locked seat. Never reveals anything — the
+   *  order is stored privately and stripped per viewer by the filter. During
+   *  picking it also refreshes the playable arrangement, so a picking timeout
+   *  locks exactly what the player had on screen. */
+  draftArrangement(seat: number, order: number[]): void {
+    if (this.phaseVal !== "betting" && this.phaseVal !== "picking") throw new Error("no hand to arrange");
+    if (!this.eligible.includes(seat) || this.betting!.isFolded(seat)) throw new Error("seat not in this hand");
+    if (this.lockedPick.has(seat)) throw new Error("arrangement already locked");
+    if (!isPermutation6(order)) throw new Error("arrangement must be a permutation of 0..5");
+    this.arrangementOrder.set(seat, [...order]);
+    if (this.phaseVal === "picking") {
+      this.arrangements.set(seat, arrangementFromOrder(this.dealt!.hole.get(seat)!, order));
+    }
   }
 
   // ---------- session controls (mirror NLHE; pre-SessionCore duplication) ----------
@@ -308,14 +369,19 @@ export class DoubleFlopManager implements TableEngine {
     const wf = b.winnerByFold();
     if (wf !== null) {
       const pot = b.totalPot();
+      this.endedByFold = true;
       this.settle(new Map([[wf, pot]]));
       return;
     }
     this.showdownSeats = b.seats().filter((s) => !b.isFolded(s));
     for (const s of this.showdownSeats) {
       const h = this.dealt!.hole.get(s)!;
-      this.arrangements.set(s, defaultArrangement(h)); // pre-filled, always playable
-      this.arrangementOrder.set(s, [0, 1, 2, 3, 4, 5]); // the default split's order
+      // the picking phase opens on whatever the player has been arranging since
+      // the deal (readability 2.4); untouched = the default 1-2 / 3-4 / 5-6 split,
+      // which is always valid and playable
+      const order = this.arrangementOrder.get(s) ?? [0, 1, 2, 3, 4, 5];
+      this.arrangements.set(s, arrangementFromOrder(h, order));
+      this.arrangementOrder.set(s, [...order]);
     }
     this.phaseVal = "picking";
     this.phaseDeadline = Date.now() + PICK_DECIDE_SEC * 1000;
@@ -417,6 +483,11 @@ export class DoubleFlopManager implements TableEngine {
         this.pushLog(`${nm} wins ${fmt(amt)}`);
       }
     }
+    // time bank refill: +5s per hand played, capped (5.2)
+    for (const s of this.eligible) {
+      const p = bySeat.get(s);
+      if (p) p.timeBank = Math.min(this.config.timeBankSec, p.timeBank + 5);
+    }
     // busted (stack 0) → spectator, removed from their seat
     for (const p of this.players.values()) p.spectating = p.stack <= 0;
     this.phaseVal = "handEnded";
@@ -460,6 +531,11 @@ export class DoubleFlopManager implements TableEngine {
   state(): GameState {
     const b = this.betting;
     const live = this.handInProgress() && b != null; // betting|picking|decisions
+    // a settled hand stays ON THE TABLE at handEnded: its boards, pots, the
+    // showdown seats' cards + splits (all public by then) and who folded, so
+    // the showdown can be replayed slowly and everyone can follow it
+    const ended = this.phaseVal === "handEnded" && b != null && this.dealt != null;
+    const onTable = live || ended;
     const bySeat = new Map([...this.players.values()].map((p) => [p.seat, p]));
     const dealtIn = new Set(this.eligible);
     const actor = this.phaseVal === "betting" ? b!.currentActor() : null;
@@ -473,8 +549,12 @@ export class DoubleFlopManager implements TableEngine {
       : "inHand";
 
     // board reveal depth: flops(3) in round 0, +turn(4) round 1, +river(5)
-    // round 2; full at showdown. Never expose beyond this to ANYONE.
-    const revealCount = this.phaseVal === "betting" ? 3 + b!.roundNumber() : 5;
+    // round 2; full at showdown. A hand that ended by folds stays at the depth
+    // it reached (no rabbit hunting). Never expose beyond this to ANYONE.
+    const revealCount =
+      this.phaseVal === "betting" ? 3 + b!.roundNumber()
+      : this.endedByFold && b ? 3 + b.roundNumber()
+      : 5;
     const bf = this.dealt?.boards;
     const boards = bf
       ? { a: bf.a.slice(0, revealCount), b: bf.b.slice(0, revealCount) }
@@ -487,8 +567,9 @@ export class DoubleFlopManager implements TableEngine {
     for (let i = 0; i < MAX_DFT_SEATS; i++) {
       const p = occupied.get(i);
       if (!p) { seats.push(emptySeatView(i)); continue; }
-      const inHandNow = live && dealtIn.has(p.seat);
-      const folded = inHandNow ? b!.isFolded(p.seat) : false;
+      const wasDealt = onTable && dealtIn.has(p.seat);
+      const inHandNow = live && wasDealt;
+      const folded = wasDealt ? b!.isFolded(p.seat) : false;
       const isShowdownSeat = this.showdownSeats.includes(p.seat);
       const decls: { potIndex: number; decision: DftDecision }[] = [];
       for (const [key, d] of this.decisions) {
@@ -502,13 +583,17 @@ export class DoubleFlopManager implements TableEngine {
         inHand: inHandNow && !folded,
         folded,
         sittingOut: p.sittingOut,
-        isButton: live ? this.lastButton === p.seat : false,
+        isButton: onTable ? this.lastButton === p.seat : false,
         isTurn: actor === p.seat,
-        holeCards: inHandNow ? (this.dealt!.hole.get(p.seat) ?? null) : null,
+        // full truth: every dealt-in seat's cards ride here for the whole hand
+        // (and through handEnded); the filter strips un-revealed ones per viewer
+        holeCards: wasDealt ? (this.dealt!.hole.get(p.seat) ?? null) : null,
         revealed: cardsRevealed && isShowdownSeat && !folded,
-        lastAction: null, // DFT betting-action badges: deferred to the UI step
+        lastAction: this.lastActionBySeat.get(p.seat) ?? null,
         timeBank: p.timeBank,
-        arrangement: inHandNow && isShowdownSeat ? (this.arrangementOrder.get(p.seat) ?? null) : null,
+        // the working split from the deal (2.4), the locked one after picking;
+        // secret until the reveal (filter), null once folded
+        arrangement: wasDealt && !folded ? (this.arrangementOrder.get(p.seat) ?? [0, 1, 2, 3, 4, 5]) : null,
         declarations: decls.length ? decls : undefined,
       });
     }
@@ -564,7 +649,9 @@ export class DoubleFlopManager implements TableEngine {
       config: this.config,
       seats,
       communityCards: [], // DFT has two boards; the UI reads state.dft.boards
-      pots: live ? b!.sidePots().map((sp) => ({ size: sp.amount, eligibleSeats: sp.eligibleSeats })) : [],
+      // pots stay listed at handEnded (eligibility per pot drives the showdown
+      // replay); totalPot is 0 once settled — the chips are back in stacks
+      pots: onTable ? b!.sidePots().map((sp) => ({ size: sp.amount, eligibleSeats: sp.eligibleSeats })) : [],
       totalPot: live ? b!.totalPot() : 0,
       round: this.phaseVal === "betting" ? (ROUND_TAG[b!.roundNumber()] ?? null) : null,
       playerToAct: actor,
@@ -599,11 +686,8 @@ export class DoubleFlopManager implements TableEngine {
 
 // ---------- arrangement helpers ----------
 
-/** Default split: cards 1-2 / 3-4 / 5-6. Always valid and playable. */
-function defaultArrangement(hole: Card[]): Arrangement {
-  return { handA: [hole[0], hole[1]], handB: [hole[2], hole[3]], tex: [hole[4], hole[5]] };
-}
-
+/** Split from an order (positions [0,1] = Hand A, [2,3] = Hand B, [4,5] = Tex).
+ *  The default order 0..5 is the 1-2 / 3-4 / 5-6 split: always valid + playable. */
 function arrangementFromOrder(hole: Card[], order: number[]): Arrangement {
   return {
     handA: [hole[order[0]], hole[order[1]]],
