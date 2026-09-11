@@ -1,183 +1,100 @@
 # Kabir — action list
 
-Ordered. Do them top to bottom. Item 1 blocks everything else.
+Ordered. Do them top to bottom. **Item 1 still blocks everything else.**
 
 ---
 
-## 1. DEPLOY THE WORKER — nothing below works until you do this
+## 1. THE WORKER DEPLOY IS STILL DORMANT — add the two CI secrets
 
-> **DONE 2026-09-11** — deployed `22fbcf8` (all of items 1–6) as worker version
-> `cc35831f`, after `party:check` + `test-engine` + `test-filter` came back green
-> on this code. Production client and server are back in sync.
+> **CHECKED 2026-09-12 (Parth's readability session).** The "Deploy game server"
+> Action has run **twice** (on `3206d9d` and `9838efa`) and **failed both times at
+> the "Deploy to Cloudflare" step** — every gate before it (npm ci, test-engine,
+> test-filter, party:check) went green. That is the missing-secrets signature:
+> wrangler refuses to deploy non-interactively without `CLOUDFLARE_API_TOKEN`.
+> The logs need repo-admin rights to read, so this is inferred from the step
+> results, not the log text — but nothing else fails only at that step.
 >
-> **⚠️ ONE MORE DORMANT COMMIT:** `9838efa` (fixes the Hold'em → Double Flop
-> switch, which item 2's numbered seats broke — see the QA note under item 4) is
-> pushed but **not deployed**: Kabir's local `wrangler login` expired mid-session
-> and can't refresh non-interactively. Kabir: run `npx wrangler login` in a
-> terminal, then `npm run party:deploy` — or add the two CI secrets (item 2) and
-> re-run the "Deploy game server" Action, which is the permanent fix.
+> **Consequence: the live worker is still on `22fbcf8` (Kabir's manual deploy).**
+> Everything after it that touches `party/` or `shared/` is pushed but NOT LIVE,
+> and the live Vercel client now sends messages the live server doesn't know
+> (`draftArrangement`, `sitToggle`, the new `show` rule). **The live site will
+> misbehave until the worker is deployed.** Dormant commits, oldest → newest:
+>
+> | Commit | What | Touches |
+> |---|---|---|
+> | `9838efa` | Hold'em → Double Flop switch fix (7-max guard) | party |
+> | `2af7dad` | log-once for the parked table (#3) | shared |
+> | `7a0637b` | live hand-split drafts (secret), hand stays on the table at handEnded, DFT badges/log/time bank | shared + party |
+> | the "showdown pace + 1E engine" commit (see git log) | shared timing + hand-end hold, runout/contest summaries, inactivity sit-out (1E.1), self sit-toggle, SHOW HANDS (1E.7), Hold'em fold-win fix | shared + party |
+>
+> **Do one of:**
+> - GitHub → Settings → Secrets and variables → Actions → add
+>   `CLOUDFLARE_API_TOKEN` ("Edit Cloudflare Workers" template) and
+>   `CLOUDFLARE_ACCOUNT_ID`, then re-run the failed "Deploy game server" run from
+>   the Actions tab. **Permanent fix — Parth never needs Cloudflare access.**
+> - or `npx wrangler login` + `npm run party:deploy` by hand (one-off).
+>
+> After deploying, hard-refresh both phones.
 
-The Cloudflare worker **does not auto-deploy.** Every commit since `b082c62`
-that touches `party/` or `shared/` is pushed to `main` but **dormant** — the
-live server is still running old code. The **frontend already auto-deployed**
-those same pushes via Vercel, so **production is currently mismatched**: the live
-client sends messages (seat requests, rebuy requests, CREATE/JOIN self-register,
-restart) that the live server doesn't understand yet.
+---
 
-```
-npm run party:deploy
-```
+## 2. Your eight QA findings — status
 
-**Commits waiting on that deploy (oldest → newest):**
-
-| Commit | Item | Touches |
+| # | Finding | Status |
 |---|---|---|
-| `b7bf584` | Item 6 — two permanent admins (Parth + Kabir), identity-based host | party |
-| `8925254` | Item 1 — busted → spectator + waiting reason + DFT dealer log | shared |
-| `02b7557` | Item 2 — numbered seats + spectator seat requests | party + shared |
-| `323f282` | Item 3 — player-initiated rebuy requests, admin-approved | party + shared |
-| `0b09e0b` | Item 4 — stop / restart / deal-next (admin) | party + shared |
-| `58094b4` | Item 5 — CREATE vs JOIN + self-registration | party |
-
-`f76f6ad` (Item 7 — pot/stack legibility) is **frontend-only**; it's already live
-via Vercel and needs no worker deploy.
-
-After deploying, hard-refresh both phones so the client picks up the matching
-build.
+| 1 | 375px: 7-button admin column covers Seat 5 / clips Seat 4 | **Fixed** (`49ded1d`): one top-right "☰ Table" menu (sheet) + a pulsing "Requests N" pill for admins. |
+| 2 | Requests panel sits on FOLD / CHECK / CALL | **Fixed** (`49ded1d`): requests live in the top-right sheet; the action bar is never covered. |
+| 3 | Dealer-log spam "Waiting for at least 2 players…" | **Fixed** (`2af7dad`, both engines): logged once, on change. Headless test in `test-lifecycle.ts`. |
+| 4 | Spectators see the disabled action bar | **Fixed** (`49ded1d`): unseated viewers get no bar (desktop: a slim dealer-log strip; phone: a "watching · tap an empty seat" note). |
+| 5 | Lobby subtitle stale | **Fixed** (`49ded1d`): "Private poker · Hold'em & Double Flop Tex · chips are points, settle up after". |
+| 6 | window.prompt / window.confirm | **Fixed** (`49ded1d`): in-app dialogs for Request chips, Edit stack, Edit rebuy, Restart, and End session. |
+| 7 | "sitting out" while apparently dealt in after a Restart | **Investigated, not a restart bug.** The flag does NOT survive a restart (proven in `test-restart.ts`). What you saw: the clock sat the idle bot out AGAIN in the fresh session, and the engine flips `sittingOut` mid-hand ("takes effect next deal") while that hand's cards are still in front of them. Reproduced live in this session. **Replaced by 1E.1** (sit out only after two whole inactive hands) and the seat now shows "away · out next hand" instead of "sitting out" while the player is still in a hand. |
+| 8 | Self-registration enables username enumeration | **Accepted for a private game**; HANDOFF's stale "no enumeration" claim corrected (`49ded1d`). |
 
 ---
 
-## 2. Give Parth a way to deploy the worker — so item 1 stops recurring
+## 3. What to test on two real phones (the readability pass)
 
-> **PIPELINE LANDED 2026-09-11, secrets pending.** The "best long-term" option
-> below is built: `.github/workflows/deploy-worker.yml` auto-deploys the worker on
-> every push to `main` that touches `party/**`, `shared/**`, `patches/**`, or the
-> package files (gated on `test-engine` + `test-filter` + `party:check`). It is
-> **dormant until Kabir adds two repo secrets** (GitHub → Settings → Secrets and
-> variables → Actions): `CLOUDFLARE_API_TOKEN` ("Edit Cloudflare Workers"
-> template, scoped to the account) and `CLOUDFLARE_ACCOUNT_ID` (dashboard →
-> Workers & Pages → right sidebar). Then re-run the workflow once from the
-> Actions tab to prove it. Until then, manual `npm run party:deploy` still applies.
-> Parth needs no Cloudflare access at all once this is green — pushing is deploying.
+Everything below is built and verified in a real browser (desktop + 375px) or
+by DOM sampling of the live table, but **not yet played by two humans**. Test
+against the LIVE site only **after item 1** — with the worker dormant, the live
+client and server disagree.
 
-This keeps happening because the worker lives on **your** Cloudflare account and
-Parth has no token. Every time Parth ships a `party/` or `shared/` change it sits
-dormant until you personally run the deploy. Fix the process, pick one:
+### 3A. Reading your cards (Double Flop)
+- [ ] Your six cards sit at the bottom in three labelled groups — **HAND A · TEX · HAND B** — from the moment they land. Never a loose row.
+- [ ] Under Hand A / Hand B a live hand name ("Pair of Kings", "Flush, Queen high") that updates as the turn and river land. Nothing under Tex.
+- [ ] Tap a card, tap another → they swap, anywhere across the three groups, any time until you lock. The names update instantly.
+- [ ] Tapping a Hand A card makes **Board A glow** (amber); Hand B → Board B (sky).
+- [ ] **Secrecy:** while one of you rearranges, the other's screen shows only your six backs — no grouping, no hint, no flicker. Try to peek. You should fail.
+- [ ] Cards are big and the suits are unmistakable (four colours) on the phone.
 
-- **Preferred:** create a scoped **Cloudflare API token** (Workers Scripts:Edit +
-  the Durable Objects the worker needs) and give it to Parth, so he can run
-  `CLOUDFLARE_API_TOKEN=… npm run party:deploy` from his own machine / CI.
-- **Or:** add Parth to the Cloudflare account/project with deploy rights.
-- **Or (best long-term):** wire a GitHub Action that runs `party:deploy` on push
-  to `main` when `party/**` or `shared/**` changed, using that token as a repo
-  secret — then the worker auto-deploys like the frontend and this whole section
-  disappears.
+### 3B. Following the hand
+- [ ] New hand: cards fly from the dealer one at a time, rotating; then Board A's three land one by one, then Board B's; the action buttons only light up once both boards are fully up.
+- [ ] Turn and river: a beat, then each board's card lands (A then B).
+- [ ] All-in: the remaining cards come one at a time with a pause, never all at once.
+- [ ] Picking phase: a timer bar + **LOCK IN** appear above your three hands (no modal). After locking: "Locked in ✓ · waiting for N/M". Locking is final.
+- [ ] Run/surrender: one card per pot you're in, each with the pot's name and stake; RUN always; SURRENDER only when you own the banked half.
 
-Until this is done, **every handoff has to re-flag "worker is dormant"** — it's
-pure recurring tax.
+### 3C. The showdown (everyone watches — spectators too)
+- [ ] **Board A** step (~3.5s): every involved Hand A, named; the winner highlighted; their five cards lifted (board + hole).
+- [ ] **Board B** step, same.
+- [ ] Each **flip** one at a time: who's flipping, their Tex hands, a fresh board dealt card by card, winner named. Smallest pot first.
+- [ ] A surrender or a tied representation flip gets its own explanation card.
+- [ ] The pot **slides to the winner** and only then do the stacks change.
+- [ ] Hold'em: involved hands revealed + named, the winner's five lifted, the pot slides. Folded players get a **SHOW HANDS** button after the hand.
 
----
-
-## 3. The two unpassed playtest gates — two real phones, both of you
-
-Neither the Hold'em nor the Double Flop multiplayer game has **ever** been played
-by two humans. Everything is headless + wire-bot verified only. Do these **after
-the deploy in item 1 is live.**
-
-### 3A. 1B — Hold'em, two devices
-A full NLHE session on two phones. Must include:
-- [ ] Both join the same table from separate phones (one CREATE, one JOIN).
-- [ ] A full hand to showdown with correct pot + payout.
-- [ ] **One mid-hand disconnect + rejoin** (background one phone / drop wifi mid-hand, come back within the 2-min grace) — the seat is held and resumes.
-- [ ] Device-takeover: log the same character in on a third device; the old one is kicked cleanly with the "logged in elsewhere" screen.
-- [ ] Ledger nets to zero at the end.
-
-### 3B. 1D — Double Flop Tex, two devices
-A full DFT session on two phones. This is the mode that **broke on the first
-all-in** before the lifecycle fixes — the point of this playtest is to confirm it
-now **recovers**. Must include:
-- [ ] Host CREATEs a DFT game; the other JOINs.
-- [ ] A full bomb-pot hand: ante → three betting rounds → the **hand-split picker** (drag, 30s timer, irreversible accept) → **run/surrender modal** (blind) → **sequential flip reveal**.
-- [ ] **Secrecy check:** while one player is picking / deciding, the other must **never** see their arrangement or run/surrender choice — only that they've "locked in." Try to peek; you should fail.
-- [ ] **Bust someone out on an all-in** (the original failure). Confirm the busted player becomes a **spectator**, sees the "waiting for ≥2 players with chips" banner, and is **not** frozen behind an overlay.
-- [ ] The busted player **requests a rebuy**; an **admin approves** it between hands; play resumes.
-- [ ] The busted player (or a new spectator) **taps an empty numbered seat**, requests it, and an **admin re-seats** them (try accept, and try edit-stack-then-accept).
-- [ ] **Restart** the table (admin): the old session settles into the ledger and a fresh game deals with the same crew, no one re-entering the room/keyword.
+### 3D. Lifecycle (still the scenario that broke the first playtest)
+- [ ] Bust someone out on an all-in → spectator → request chips / tap a seat → admin approves from the **Requests** pill → play resumes.
+- [ ] **Restart** from the Table menu (in-app confirm) → settled ledger → fresh hand #1, same crew.
+- [ ] Sit out only after **two whole hands** with no action; "I'm back — deal me in" from the Table menu brings you back.
+- [ ] Refresh the phone mid-session → you're back at the table without re-typing anything. End the session → the next visit asks you to log in.
+- [ ] You always see yourself at the bottom; the dealer button follows its seat.
+- [ ] Bet slider steps in 50s; the minimum bet is still 200.
 
 ---
 
-## 4. Eyeball the lifecycle UI — it shipped with NO visual QA
+## 4. FYI — nothing to do, just know
 
-Items 1–7 were verified headless + over the wire + a clean build, and item 7's
-font sizes were checked in a browser — but the **screenshot tool was down**, so
-nobody has actually *looked* at the new surfaces as rendered. During the 3B
-playtest, sanity-check these at **desktop and on the phone (375px)**:
-
-- **Item 1 — waiting banner:** readable, centered, doesn't cover the whole table; spectators can still see the felt around it.
-- **Item 2 — empty seats + admin request panel:** numbered seats render (NLHE 1–8 / DFT 1–7); "tap to sit" only shows for a spectator; the admin Requests panel's accept/reject/ignore/edit-stack buttons are reachable and don't overlap the table on mobile.
-- **Item 3 — "Request chips" control:** visible to a seated player, opens the amount prompt; the admin sees the rebuy in the Requests panel.
-- **Item 4 — Deal-next / Restart / End buttons:** present for admins in the side controls; the Restart confirm dialog reads clearly; **not** shown to non-admins.
-- **Item 5 — CREATE vs JOIN lobby:** the two tabs switch; CREATE shows mode + blinds + starting stack, JOIN shows only character/table/keyword; both usable one-handed on a phone.
-- **Item 7 — pot + stacks:** the pot is the biggest, most obvious number on the felt; every seated stack is legible across the table; for DFT the pot reads clearly between the two boards. (Confirmed numerically; confirm it *looks* right.)
-
-Log anything ugly or broken back to Parth — visual polish that isn't a
-correctness bug can fold into Phase 1E.
-
-> **QA DONE 2026-09-11** (real browser, desktop + 375px, local server + a
-> non-admin bot as the second player). Every surface above renders and works:
-> - **Item 1** banner: centered, readable, felt visible around it; spectators not trapped. ✅
-> - **Item 2** seats: DFT 1–7 render; "tap to sit" shows only for a spectator; the
->   Requests panel appears with Accept / Edit stack / Reject / Ignore, all reachable. ✅
-> - **Item 3**: "Request chips" visible to a seated player; the admin sees
->   "arjun → rebuy +1,000" with Approve / Edit / Reject. ✅
-> - **Item 4**: Restart / End present for admins, absent for a non-admin; Restart →
->   "Session over" settled ledger → Back to room → fresh hand #1, same crew. ✅
->   (Deal-next only appears at handEnded — not captured, logic reviewed.)
-> - **Item 5**: CREATE shows mode + blinds + stack, JOIN only character/table/keyword;
->   both one-thumb at 375px. ✅
-> - **Item 7**: the pot is the biggest number on the felt (between the boards in DFT);
->   every stack legible. ✅
->
-> **Found and FIXED (commit after this note):**
-> - **Regression — Hold'em → Double Flop switch was impossible.** `setGameMode`'s
->   7-max guard counted every numbered slot (item 2 made `seats` always 8 long), so
->   an 8-slot NLHE table always got "seats 7 max — sit someone out first". Now skips
->   `empty` seats. Caught by `test-online-dft.ts` — **run the online E2Es too**
->   (`test-online.ts`, `test-online-dft.ts`), not just the five lifecycle tests.
-> - `test-online.ts` was stale against items 1–5 (it rebought busted players via
->   `addChips`, but a busted player is now unseated → the table parked). Its bots
->   now use the real lifecycle: unseated → `requestSeat`, host accepts with a stack.
->
-> **Found, NOT fixed — for Parth / 1E (none block the playtest):**
-> 1. **375px: the admin side-controls column (7 buttons) covers Seat 5 and clips
->    Seat 4** at the top of the table. Needs a compact admin menu on phones.
-> 2. **The Requests panel sits on top of FOLD / CHECK / CALL** at both widths — when
->    it's the admin's turn to act, their own buttons are hidden. Move it or collapse it.
-> 3. **Dealer log spam:** "Waiting for at least 2 players with chips" is appended on
->    every broadcast (3× within seconds). Log it once, on change.
-> 4. **Spectators still see the (disabled) FOLD / CHECK / CALL / RAISE bar** — hide it
->    for unseated viewers now that spectating is a real state.
-> 5. Lobby subtitle still reads "Private cash game · No-Limit Hold'em" — stale.
-> 6. Rebuy amount, edit-stack, and the Restart confirm use raw `window.prompt` /
->    `window.confirm` — functional, but generic browser dialogs. 1E polish.
-> 7. Worth a look in the playtest: after a Restart, a player the clock had auto-sat-out
->    still showed "sitting out" on the fresh table while apparently dealt in.
-> 8. **Item 5 tradeoff, decide consciously:** self-registration makes username
->    enumeration possible (known name + wrong keyword → rejected; unknown name →
->    admitted as a spectator). Fine for a private game, but HANDOFF's "no
->    enumeration" claim is now stale — `test-online.ts` asserts the new behaviour.
-
----
-
-## 5. FYI — nothing to do, just know
-
-- **Both DFT rule questions are ruled** (`docs/double-flop-tex-answers.md` →
-  RULINGS): **R1** surrender = banker-only; **R2** flip ties = even split, no
-  re-runs. No action — this is settled law now.
-- **Step 6 (the DFT server seam) is done** — server hosts both engines,
-  `filter.ts` enforces arrangement/declaration secrecy, the DFT UI exists. If any
-  older note lists it as "next," that note is stale.
-- **For Parth (engine owner), not you:** R1's enforcement (banker-only surrender)
-  had to be added at `manager.declare()` — the answers doc's original "no code
-  change needed" was inaccurate. Engine + doc now agree; just so he knows the
-  enforcement point is in his layer.
+- **Both DFT rule questions are ruled** (`docs/double-flop-tex-answers.md` → RULINGS): R1 surrender = banker-only; R2 flip ties = even split, no re-runs.
+- **A pre-existing Hold'em bug was fixed in passing:** poker-ts ends a fold-win through its showdown path, and the engine used to mark the survivor's cards *revealed* and report no winner row (no "wins" badge, no log line). Fold-wins now keep the winner's cards hidden (they may SHOW) and report the pot. `test-lifecycle.ts` covers it.
+- **The hand-end hold is now a shared contract** (`shared/engine/timing.ts`): the server holds a finished hand for exactly as long as the client's replay needs. Change the pace there, never in the server.
