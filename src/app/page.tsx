@@ -9,6 +9,7 @@ import { Lobby } from "@/components/Lobby";
 import { SetupPlayer } from "@/components/GameSetupForm";
 import { LocalGame } from "@/components/LocalGame";
 import { OnlineGame } from "@/components/OnlineGame";
+import { clearStoredLogin, readStoredLogin, storeLogin } from "@/lib/login";
 
 type Screen =
   | { kind: "lobby" }
@@ -17,14 +18,23 @@ type Screen =
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>({ kind: "lobby" });
-  const toLobby = () => setScreen({ kind: "lobby" });
+  const toLobby = () => { clearStoredLogin(); setScreen({ kind: "lobby" }); };
 
   // Dev-only escape hatch for the hot-seat debug harness. Read after
   // mount (not during render) so server and client HTML always match.
   const [devLocal, setDevLocal] = useState(false);
   useEffect(() => {
     setDevLocal(new URLSearchParams(window.location.search).get("dev") === "local");
+    // 1E.4: a refresh mid-session rejoins the same room + seat automatically.
+    // A CREATE login rejoins as a plain join (the game already exists).
+    const saved = readStoredLogin();
+    if (saved) setScreen({ kind: "online", room: saved.room, myId: saved.myId, keyword: saved.keyword });
   }, []);
+
+  const goOnline = (room: string, myId: string, keyword: string, create?: { config: GameConfig; mode: Variant }) => {
+    storeLogin({ room, myId, keyword });
+    setScreen({ kind: "online", room, myId, keyword, create });
+  };
 
   switch (screen.kind) {
     case "local":
@@ -39,9 +49,8 @@ export default function Home() {
         <Lobby
           devLocal={devLocal}
           onStartLocal={(config, players) => setScreen({ kind: "local", config, players })}
-          onJoinOnline={(room, myId, keyword) => setScreen({ kind: "online", room, myId, keyword })}
-          onCreateOnline={(room, myId, keyword, config, mode) =>
-            setScreen({ kind: "online", room, myId, keyword, create: { config, mode } })}
+          onJoinOnline={(room, myId, keyword) => goOnline(room, myId, keyword)}
+          onCreateOnline={(room, myId, keyword, config, mode) => goOnline(room, myId, keyword, { config, mode })}
         />
       );
   }

@@ -26,11 +26,12 @@ import { ActionBar, LogStrip } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
 import { DftDecisions } from "./DftDecisions";
-import { DftReveal } from "./DftReveal";
 import { HandDock } from "./HandDock";
 import { Sheet } from "./Sheet";
 import { Dialog, DialogSpec } from "./Dialog";
-import { labelHand } from "@/lib/handLabel";
+import { buildFrame, ShowdownPanel } from "./Showdown";
+import { usePresentation } from "@/hooks/use-presentation";
+import { labelHand, cardKey } from "@/lib/handLabel";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
@@ -39,7 +40,7 @@ const BUBBLE_MS = 4500;
 type Pt = [number, number];
 // Phone maps: side rows sit ABOVE and BELOW the board band so a 5-card row
 // never touches a plate; the top pair clears the corner chrome.
-const PHONE_7: Pt[] = [[50, 62], [13, 56], [13, 21], [30, 12], [70, 12], [87, 21], [87, 56]];
+const PHONE_7: Pt[] = [[50, 62], [12, 52], [13, 21], [30, 12], [70, 12], [87, 21], [88, 52]];
 const PHONE_8: Pt[] = [[50, 73], [15, 61], [12, 36], [29, 14], [50, 10], [71, 14], [88, 36], [85, 61]];
 /** display indexes whose seats sit on the TOP rail (cards hang below the plate) */
 const TOP_ROW: Record<number, number[]> = { 7: [3, 4], 8: [3, 4, 5] };
@@ -98,6 +99,7 @@ interface Props {
   onDeclare?: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
   onAddChips?: (id: string, amount: number) => void;
   onSitToggle?: (id: string, out: boolean) => void;
+  onSitSelf?: (out: boolean) => void;   // online: I sit out / come back myself (1E.1)
   onRequestSeat?: (seat: number) => void;                                                 // spectator taps an empty seat (item 2)
   onSeatRequest?: (playerId: string, action: "accept" | "reject" | "ignore", stack?: number) => void; // admin resolves it
   onRequestChips?: (amount: number) => void;                                              // seated player asks for a rebuy (item 3)
@@ -110,7 +112,7 @@ export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
   connectedIds, chat, myId, onChat, connPill, roomLine, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
-  onDraftArrangement, onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
+  onDraftArrangement, onSubmitArrangement, onDeclare, onAddChips, onSitToggle, onSitSelf,
   onRequestSeat, onSeatRequest, onRequestChips, onChipRequest, onDealNext, onRestart,
 }: Props) {
   const phone = useIsPhone();
@@ -138,13 +140,21 @@ export function TableView({
   // POV rotation (1E.6): I'm display index 0 (bottom); spectators see seat 1 there
   const anchor = mySeat ?? 0;
   const displayIndex = (seat: number) => (seat - anchor + n) % n;
+  // the table's sense of time: dealing, reveals, the slow showdown (Part 3)
+  const pres = usePresentation(s);
+  const frame = pres.step ? buildFrame(s, pres.step, pres.stepElapsed) : null;
+  const dealing = pres.dealt != null;
+  const cy = phone ? (isDft ? 36 : 44) : 44; // the felt's centre line (scene %)
+  // until the pot has moved, show the pre-settlement picture
+  const stackOf = (v: SeatView) => (pres.frozen ? pres.frozen.stacks.get(v.seat) ?? v.stack : v.stack);
+  const potShown = pres.frozen ? pres.frozen.pot : s.totalPot;
   // deadlines are SERVER epoch ms — offset our clock so the bar reads true
   const displayNow = Date.now() + clockOffsetMs;
   const timerPct = s.turnDeadlineAt && s.turnStartedAt
     ? Math.max(0, (s.turnDeadlineAt - displayNow) / (s.turnDeadlineAt - s.turnStartedAt))
     : null;
   const winBySeat = new Map(
-    (s.phase === "handEnded" ? s.lastHandResult ?? [] : []).map((r) => [
+    (s.phase === "handEnded" && !pres.frozen ? s.lastHandResult ?? [] : []).map((r) => [
       r.seat,
       `WINS ${fmt(r.amountWon)}${r.handName ? " · " + r.handName.toUpperCase() : ""}`,
     ])
@@ -163,9 +173,11 @@ export function TableView({
 
   const seated = mode === "hotseat" || mySeat != null; // spectators get no action bar (#4)
   const myTurn = mode === "hotseat" || (mySeat != null && s.playerToAct === mySeat);
+  // SHOW HANDS (1E.7): once the hand is over, a folded player or the fold-win
+  // winner may turn their cards up; the engine says who may
   const canShow = mode === "hotseat"
-    ? s.canShowSeat != null
-    : s.canShowSeat != null && s.canShowSeat === mySeat;
+    ? (s.showableSeats?.length ?? 0) > 0 || s.canShowSeat != null
+    : mySeat != null && ((s.showableSeats?.includes(mySeat) ?? false) || s.canShowSeat === mySeat);
   const me: SeatView | undefined = mySeat != null ? s.seats.find((x) => x.seat === mySeat) : undefined;
 
   // ---- Double Flop: my dock + the picking / decision phases ----
@@ -186,8 +198,10 @@ export function TableView({
   const dockEditable = !!dockCards && s.phase === "inHand" && !dockLocked && !!onDraftArrangement &&
     (s.dft!.subPhase === "betting" || (s.dft!.subPhase === "picking" && iAmPicking));
   // during picking / decisions the betting buttons are meaningless — free the
-  // bottom of the screen for the dock's timer + LOCK
-  const showActionBar = seated && !(isDft && (s.dft!.subPhase === "picking" || s.dft!.subPhase === "decisions") && s.phase === "inHand");
+  // bottom of the screen for the dock's timer + LOCK; the showdown replay
+  // takes that band too
+  const showActionBar = seated && !frame &&
+    !(isDft && (s.dft!.subPhase === "picking" || s.dft!.subPhase === "decisions") && s.phase === "inHand");
 
   const requestCount = (isHost ? (s.seatRequests?.length ?? 0) + (s.chipRequests?.length ?? 0) : 0);
   const closeSheet = () => setSheet(null);
@@ -197,14 +211,22 @@ export function TableView({
   const myNlheLabel = !isDft && me?.holeCards && me.holeCards.length === 2 && s.communityCards.length >= 3
     ? labelHand(me.holeCards, s.communityCards) : null;
 
-  const boardRow = (tag: "a" | "b", cards: GameState["communityCards"]) => (
-    <div className={`dft-board ${tag}${focusBoard === tag ? " focus" : ""}`}>
-      <span className="dft-board-tag"><b>{tag.toUpperCase()}</b> Board {tag.toUpperCase()}</span>
-      <div className="dft-cards">
-        {cards.map((c, i) => <CardFace key={`${tag}${i}`} card={c} size={phone ? "sm" : "md"} delay={i * 90} />)}
+  const boardRow = (tag: "a" | "b", cards: GameState["communityCards"]) => {
+    const live = frame?.liveBoard === tag;
+    const dimmed = !!frame?.liveBoard && frame.liveBoard !== tag;
+    return (
+      <div className={`dft-board ${tag}${focusBoard === tag ? " focus" : ""}${live ? " live" : ""}${dimmed ? " dimmed" : ""}`}>
+        <span className="dft-board-tag"><b>{tag.toUpperCase()}</b> Board {tag.toUpperCase()}</span>
+        <div className="dft-cards">
+          {cards.slice(0, pres.boards[tag]).map((c, i) => (
+            <CardFace key={`${tag}${i}-${cardKey(c)}`} card={c} size={phone ? "sm" : "md"}
+              lift={live && !!frame && frame.boardLift.has(cardKey(c))}
+              dim={live && !!frame && frame.boardLift.size > 0 && !frame.boardLift.has(cardKey(c))} />
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className={`scene${isDft ? " dft" : ""}${phone ? " phone" : ""}`}>
@@ -253,18 +275,45 @@ export function TableView({
         {isDft ? (
           <div className="dft-boards">
             {boardRow("a", s.dft!.boards.a)}
-            {s.totalPot > 0 && <div className="pot-line dft-pot">POT {fmt(s.totalPot)}</div>}
+            {potShown > 0 && <div className="pot-line dft-pot">POT {fmt(potShown)}</div>}
             {boardRow("b", s.dft!.boards.b)}
           </div>
         ) : (
           <>
             <div className="board">
-              {s.communityCards.map((c, i) => <CardFace key={i} card={c} size={phone ? "sm" : "md"} delay={i * 90} />)}
+              {s.communityCards.slice(0, pres.boards.c).map((c, i) => (
+                <CardFace key={`${i}-${cardKey(c)}`} card={c} size={phone ? "sm" : "md"}
+                  lift={!!frame && frame.boardLift.has(cardKey(c))}
+                  dim={!!frame && frame.boardLift.size > 0 && !frame.boardLift.has(cardKey(c))} />
+              ))}
             </div>
-            {s.totalPot > 0 && <div className="pot-line">POT {fmt(s.totalPot)}</div>}
+            {potShown > 0 && <div className="pot-line">POT {fmt(potShown)}</div>}
           </>
         )}
       </div>
+      <div className={`dealer-puck${dealing ? " dealing" : ""}`} style={{ top: `${cy}%` }} aria-hidden="true">♠</div>
+
+      {/* hole cards in flight: from the dealer to each seat, one at a time */}
+      {pres.flights.map((f) => {
+        const p = seatPos(displayIndex(f.seat), n, phone, s.variant);
+        return (
+          <div key={f.key} className="fly-card"
+            style={{ left: `${p.x}%`, top: `${p.y}%`, ["--fx" as string]: `${50 - p.x}vw`, ["--fy" as string]: `${cy - p.y}dvh` }}>
+            <CardFace card={null} size="xs" />
+          </div>
+        );
+      })}
+
+      {/* the pot sliding to the winner(s) */}
+      {pres.step?.kind === "pot" && (s.lastHandResult ?? []).filter((r) => r.amountWon > 0).map((r) => {
+        const p = seatPos(displayIndex(r.seat), n, phone, s.variant);
+        return (
+          <div key={r.seat} className="pot-fly"
+            style={{ top: `${cy}%`, ["--tx" as string]: `${p.x - 50}vw`, ["--ty" as string]: `${p.y - cy}dvh` }}>
+            +{fmt(r.amountWon)}
+          </div>
+        );
+      })}
 
       {s.seats.map((v) => {
         const di = displayIndex(v.seat);
@@ -273,14 +322,18 @@ export function TableView({
         const peeking = mode === "online" ? mine : peekSeat === v.seat;
         // a spectator (not seated) may tap an empty seat to request it (item 2)
         const canRequest = mode === "online" && mySeat == null && !!v.empty && !!onRequestSeat;
-        const inDock = mine && !!dockCards; // my DFT seat lives in the dock
+        const inDock = mine && !!dockCards && !frame; // my DFT seat lives in the dock (the panel takes over at showdown)
+        const shownView: SeatView = pres.frozen && !v.empty ? { ...v, stack: stackOf(v), betSize: 0 } : v;
         return (
           <span key={v.seat}>
             {!inDock && (
-              <Seat view={v}
+              <Seat view={shownView}
                 x={p.x} y={p.y}
                 top={phone && (TOP_ROW[n] ?? []).includes(di)}
                 fan={!mine && !v.revealed}
+                phone={phone}
+                frame={frame?.seats.get(v.seat)}
+                visibleCards={pres.dealt?.get(v.seat)}
                 timerPct={v.isTurn ? timerPct : null}
                 peeking={peeking}
                 peekable={mode === "hotseat"}
@@ -304,13 +357,14 @@ export function TableView({
 
       {/* My six cards, always grouped (2.2) + live names (2.3) + rearranging (2.4).
           The picking phase happens right here: timer + LOCK on the dock. */}
-      {dockCards && me && (
+      {dockCards && me && !frame && (
         <HandDock
           handNumber={s.handNumber}
           holeCards={dockCards}
           serverOrder={me.arrangement ?? null}
-          boards={s.dft!.boards}
-          editable={dockEditable}
+          boards={{ a: s.dft!.boards.a.slice(0, pres.boards.a), b: s.dft!.boards.b.slice(0, pres.boards.b) }}
+          visibleCount={pres.dealt?.get(me.seat) ?? 6}
+          editable={dockEditable && pres.ready}
           locked={dockLocked}
           picking={pk && iAmPicking ? {
             deadlineAt: s.turnDeadlineAt, displayNow,
@@ -321,7 +375,7 @@ export function TableView({
           onLock={() => onSubmitArrangement?.(me.arrangement ?? [0, 1, 2, 3, 4, 5])}
           onFocusBoard={setFocusBoard}
         >
-          <Seat view={me} hideCards
+          <Seat view={pres.frozen ? { ...me, stack: stackOf(me), betSize: 0 } : me} hideCards
             timerPct={me.isTurn ? timerPct : null}
             peeking peekable={false}
             offline={false}
@@ -332,20 +386,24 @@ export function TableView({
         </HandDock>
       )}
 
-      {canShow && (
-        <button className="menu-pill show-btn" onClick={onShow}>Show winning cards</button>
+      {canShow && !frame && (
+        <button className="menu-pill show-btn" onClick={onShow}>Show hands</button>
       )}
 
       {/* Seated players get the action bar; spectators never see disabled
           betting buttons (#4) — just the dealer log on wide screens. */}
       {showActionBar ? (
-        <ActionBar state={s} enabled={myTurn}
+        <ActionBar state={s} enabled={myTurn && pres.ready}
           onAct={(a, amt) => { onAct(a, amt); setPeekSeat(null); }}
           onTimeBank={onTimeBank}
         />
-      ) : !seated ? (
+      ) : !seated && !frame ? (
         <div className="spectator-strip"><LogStrip log={s.log} /></div>
       ) : null}
+
+      {/* The showdown, replayed slowly for EVERYONE (players, folded, spectators):
+          Board A → Board B → each flip → outcomes → the pot to the winner. */}
+      {frame && <ShowdownPanel frame={frame} free={!showActionBar} />}
 
       {/* Picking phase, for everyone NOT picking: a quiet felt banner. Pickers
           use the dock; nobody is ever stuck behind an overlay. */}
@@ -360,6 +418,7 @@ export function TableView({
         <DftDecisions
           key={s.handNumber}
           decisions={dec}
+          potCount={s.pots.length}
           mySeat={mySeat}
           deadlineAt={s.turnDeadlineAt}
           displayNow={displayNow}
@@ -375,15 +434,6 @@ export function TableView({
       {/* Why the table can't deal (both modes) — item 1, so it's never silent. */}
       {s.waitingReason && s.phase !== "inHand" && (
         <div className="waiting-banner">{s.waitingReason}</div>
-      )}
-
-      {isDft && s.phase === "handEnded" && s.dft!.flips.length > 0 && (
-        <DftReveal
-          key={s.handNumber}
-          flips={s.dft!.flips}
-          result={s.lastHandResult ?? []}
-          nameOf={(seat) => s.seats.find((x) => x.seat === seat)?.name ?? `Seat ${seat + 1}`}
-        />
       )}
 
       {s.phase === "paused" && (
@@ -437,6 +487,12 @@ export function TableView({
                 });
               }}>
                 Request chips <span className="hint">rebuy / top-up</span>
+              </button>
+            )}
+            {mode === "online" && me && !me.empty && onSitSelf && (
+              <button className="sheet-item" onClick={() => { closeSheet(); onSitSelf(!me.sittingOut); }}>
+                {me.sittingOut ? "I'm back — deal me in" : "Sit out a while"}
+                <span className="hint">{me.sittingOut ? "from the next hand" : "skips hands until you're back"}</span>
               </button>
             )}
             {requestCount > 0 && (

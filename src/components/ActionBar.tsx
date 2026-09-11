@@ -62,7 +62,7 @@ export function ActionBar({ state: s, enabled = true, onAct, onTimeBank }: Props
           <div className="raise-box">
             <input
               type="range" min={range.min} max={range.max}
-              step={Math.max(1, s.config.smallBlind)}
+              step={50} /* 1E.2: 50-chip steps; the minimum bet stays the engine's min */
               value={amount}
               onChange={(e) => setAmount(Number(e.target.value))}
               aria-label="Bet amount"

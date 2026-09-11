@@ -13,7 +13,7 @@
 // ============================================================
 
 import type { Card } from "@/engine/types";
-import { bestHand } from "@/engine/dft/eval";
+import { bestHand, winnerIndices } from "@/engine/dft/eval";
 
 export interface HandLabel {
   name: string;      // "Two Pair, Aces and Kings"
@@ -63,6 +63,19 @@ export function labelHand(hole: readonly Card[], board: readonly Card[]): HandLa
 
 export function sameCard(a: Card, b: Card): boolean {
   return a.rank === b.rank && a.suit === b.suit;
+}
+
+/** Stable key for Sets/Maps of cards. */
+export function cardKey(c: Card): string {
+  return `${c.rank}-${c.suit}`;
+}
+
+/** Which seats win this board among the given hands — the SAME tie-aware
+ *  comparison the engine's showdown uses (pokersolver winners). */
+export function boardWinners(entries: { seat: number; hole: readonly Card[] }[], board: readonly Card[]): number[] {
+  if (entries.length === 0 || board.length < 3) return [];
+  const evals = entries.map((e) => bestHand(e.hole, board));
+  return winnerIndices(evals).map((i) => entries[i].seat);
 }
 
 /** Is `c` one of the five that made the hand? */

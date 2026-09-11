@@ -1,7 +1,9 @@
 "use client";
-import { SeatView } from "@/engine/types";
+import { Card, SeatView } from "@/engine/types";
 import { fmt } from "@/engine/manager";
 import { CardFace, CardSize } from "./CardFace";
+import type { SeatFrame } from "./Showdown";
+import { cardKey } from "@/lib/handLabel";
 
 interface Props {
   view: SeatView;
@@ -17,16 +19,24 @@ interface Props {
   visibleCards?: number;         // deal animation: how many cards have arrived so far
   top?: boolean;                 // seat on the top rail: cards hang below the plate
   fan?: boolean;                 // hidden cards stack into a tight fan (6 backs in one row)
+  phone?: boolean;               // compact reveal (only the hand in play)
+  frame?: SeatFrame;             // showdown step: which hand is live, what won, which cards lift
   canRequest?: boolean;          // spectator may tap this empty seat to request it (item 2)
   onRequestSeat?: () => void;
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
+const GROUPS: { key: "a" | "tex" | "b"; label: string; pos: [number, number] }[] = [
+  { key: "a", label: "A", pos: [0, 1] },
+  { key: "tex", label: "Tex", pos: [4, 5] },
+  { key: "b", label: "B", pos: [2, 3] },
+];
+
 export function Seat({
   view: v, x, y, timerPct, peeking, peekable = true, offline = false, bubble = null,
   backCount = 2, cardSize = "xs", hideCards = false, visibleCards, top = false, fan = false,
-  canRequest = false, onRequestSeat, onPeek, winBadge,
+  phone = false, frame, canRequest = false, onRequestSeat, onPeek, winBadge,
 }: Props) {
   const pos = x != null && y != null ? { left: `${x}%`, top: `${y}%` } : undefined;
   const inline = pos === undefined;
@@ -50,28 +60,67 @@ export function Seat({
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
   const total = v.holeCards ? v.holeCards.length : backCount;
   const count = Math.min(total, visibleCards ?? total);
+  // a revealed Double Flop seat shows its three hands (the public split)
+  // (on a phone only while a showdown step names the hand in play — otherwise a fan)
+  const grouped = showFaces && v.holeCards && v.holeCards.length === 6 && v.arrangement && v.arrangement.length === 6 && (!phone || !!frame);
+
+  const renderCards = () => {
+    if (grouped) {
+      const h = v.holeCards!;
+      const o = v.arrangement!;
+      const active = frame?.active ?? null;
+      const groups = phone && active ? GROUPS.filter((g) => g.key === active) : GROUPS;
+      return (
+        <div className="seat-groups">
+          {groups.map((g) => {
+            const cards: Card[] = [h[o[g.pos[0]]], h[o[g.pos[1]]]];
+            const isActive = active == null || active === g.key;
+            return (
+              <div key={g.key} className={`seat-group ${g.key}${isActive ? " active" : ""}`}>
+                <span className="g-label">{g.label}</span>
+                <span className="g-cards">
+                  {cards.map((c, i) => (
+                    <CardFace key={i} card={c} size="xs" lift={!!frame && isActive && frame.used.has(cardKey(c))} />
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    return (
+      <div className={`seat-cards${fan && (!showFaces || phone) ? " fan" : ""}`}>
+        {/* online: server strips opponents' holeCards to null — still
+            show backs, an in-hand player must LOOK in the hand */}
+        {(v.inHand || (v.revealed && v.holeCards)) && Array.from({ length: count }, (_, i) => {
+          const c = showFaces && v.holeCards ? v.holeCards[i] : null;
+          return (
+            <CardFace key={i} card={c} size={cardSize} delay={i * 40}
+              lift={!!c && !!frame && frame.used.has(cardKey(c))}
+              dim={!!c && !!frame && frame.won && frame.used.size > 0 && !frame.used.has(cardKey(c))} />
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div
-      className={`seat${inline ? " inline" : ""}${top ? " top" : ""}${v.isTurn ? " turn" : ""}${v.folded ? " folded" : ""}${v.sittingOut ? " out" : ""}`}
+      className={`seat${inline ? " inline" : ""}${top ? " top" : ""}${v.isTurn ? " turn" : ""}${v.folded ? " folded" : ""}${v.sittingOut ? " out" : ""}${frame?.won ? " won" : ""}`}
       style={pos}
     >
       {bubble && <div className="chat-bubble">{bubble}</div>}
-      {!hideCards && (
-        <div className={`seat-cards${fan && !showFaces ? " fan" : ""}`}>
-          {/* online: server strips opponents' holeCards to null — still
-              show backs, an in-hand player must LOOK in the hand */}
-          {(v.inHand || (v.revealed && v.holeCards)) && Array.from({ length: count }, (_, i) => (
-            <CardFace key={i} card={showFaces && v.holeCards ? v.holeCards[i] : null} size={cardSize} delay={i * 40} />
-          ))}
-        </div>
-      )}
+      {!hideCards && renderCards()}
+      {!hideCards && frame?.label && <div className="seat-hand-name">{frame.label}</div>}
       <div className="plate">
         {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
         <div className="name">
           {v.name}
           {offline && !v.sittingOut && <span className="offline-tag">offline</span>}
         </div>
-        <div className="stack">{v.sittingOut ? "sitting out" : fmt(v.stack)}</div>
+        <div className="stack">{v.sittingOut && !v.inHand ? "sitting out" : fmt(v.stack)}</div>
+        {v.sittingOut && v.inHand && <div className="away-tag">away · out next hand</div>}
         {v.isTurn && timerPct != null && (
           <div className="timer-track">
             <div

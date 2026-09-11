@@ -49,6 +49,7 @@ export interface RoomHandle {
     act: (action: PlayerAction, amount?: number) => void;
     timeBank: () => void;
     show: () => void;
+    sitToggle: (out: boolean) => void;                  // sit out / come back on my own (1E.1)
     chat: (text: string) => void;
     host: (cmd: HostCommand) => void;
     draftArrangement: (order: number[]) => void;        // DFT working split, any time until lock (2.4)
@@ -164,6 +165,7 @@ export function useRoom(room: string, myId: string, keyword: string): RoomHandle
       act: (action: PlayerAction, amount?: number) => post({ type: "act", action, amount }),
       timeBank: () => post({ type: "timeBank" }),
       show: () => post({ type: "show" }),
+      sitToggle: (out: boolean) => post({ type: "sitToggle", out }),
       chat: (text: string) => post({ type: "chat", text }),
       host: (cmd: HostCommand) => post({ type: "host", cmd }),
       draftArrangement: (order: number[]) => post({ type: "draftArrangement", order }),

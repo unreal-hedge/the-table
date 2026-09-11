@@ -873,3 +873,124 @@ input { font: inherit; color: var(--text); }
   .chat-panel { top: 52px; right: 10px; left: 10px; width: auto; max-height: 48vh; }
 }
 @media (min-width: 641px) { .scene.dft .round-tag { top: 17%; } .scene.dft .table-brand { top: 9%; } }
+
+/* ============ MOTION: dealing + reveals (Part 3) ============ */
+/* a card in flight: positioned at its seat, animated FROM the dealer puck at
+   the felt centre (the offset arrives as --fx/--fy in viewport units) */
+.fly-card {
+  position: absolute; z-index: 11; pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.fly-card .card { animation: flyIn 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes flyIn {
+  from { transform: translate(var(--fx), var(--fy)) scale(0.55) rotate(-24deg); opacity: 0.4; }
+  to   { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+}
+.dealer-puck {
+  position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 3;
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card-face); color: var(--suit-spades); font-size: 15px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(224, 176, 84, 0.45);
+  pointer-events: none; opacity: 0; transition: opacity 0.3s ease;
+}
+.dealer-puck.dealing { opacity: 1; animation: puckPulse 0.5s ease infinite; }
+@keyframes puckPulse { 50% { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45), 0 0 0 6px rgba(224, 176, 84, 0.25); } }
+/* board cards landing: a little drop + flip-in per card */
+.dft-cards .card, .board .card { animation: landCard 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes landCard { from { opacity: 0; transform: translateY(-14px) rotateY(70deg); } to { opacity: 1; transform: none; } }
+.dft-board.dimmed { opacity: 0.38; filter: saturate(0.5); }
+.dft-board.live { background: rgba(0, 0, 0, 0.22); box-shadow: 0 0 0 2px var(--accent), 0 0 30px color-mix(in srgb, var(--accent) 50%, transparent); }
+
+/* ============ SHOWDOWN PANEL (Part 3.3) ============ */
+.sd-panel {
+  position: absolute; left: 50%; bottom: var(--bar-h); transform: translateX(-50%); z-index: 14;
+  width: min(600px, 96vw); max-height: 46dvh; overflow-y: auto; scrollbar-width: thin;
+  background: rgba(12, 9, 10, 0.94); border: 1px solid var(--line); border-radius: 18px;
+  padding: 14px 16px 14px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); backdrop-filter: blur(6px);
+  animation: sheetIn 0.25s ease both;
+}
+.sd-panel.free { bottom: 14px; }
+.sd-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sd-chip {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 15px; color: #1a1408;
+}
+.sd-chip.a { background: var(--board-a); } .sd-chip.b { background: var(--board-b); }
+.sd-title { font-family: var(--font-display), sans-serif; font-size: 20px; font-weight: 700; }
+.sd-sub { font-size: 12px; color: var(--muted); }
+.sd-runout { display: flex; gap: 6px; justify-content: center; padding: 6px 0 12px; }
+.sd-rows { display: flex; flex-direction: column; gap: 6px; }
+.sd-row {
+  display: grid; grid-template-columns: minmax(64px, 1fr) auto minmax(0, 2fr) auto; align-items: center; gap: 12px;
+  padding: 8px 10px; border-radius: 12px; border: 1px solid transparent; background: rgba(242, 236, 221, 0.03);
+}
+.sd-row.won { border-color: rgba(91, 224, 138, 0.5); background: rgba(91, 224, 138, 0.08); }
+.sd-name { font-weight: 600; font-size: 14px; }
+.sd-row.won .sd-name { color: var(--glow); }
+.sd-cards { display: flex; gap: 4px; }
+.sd-label { font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 14px; }
+.sd-note { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); white-space: nowrap; }
+.sd-row.won .sd-note { color: var(--glow); }
+.sd-foot { margin-top: 10px; font-size: 14px; line-height: 1.45; color: var(--text); }
+/* the pot sliding to a winner */
+.pot-fly {
+  position: absolute; left: 50%; top: 44%; z-index: 13; pointer-events: none;
+  font-family: var(--font-mono), monospace; font-size: 18px; font-weight: 700; color: #1a1408;
+  background: var(--gold); border-radius: 20px; padding: 6px 16px; white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  animation: potFly 1.5s cubic-bezier(0.3, 0.8, 0.3, 1) both;
+}
+@keyframes potFly {
+  from { transform: translate(-50%, -50%) scale(1); }
+  to   { transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0.85); }
+}
+/* revealed seats at showdown: three tiny labelled pairs (desktop) */
+.seat-groups { display: flex; gap: 6px; justify-content: center; margin-bottom: 5px; }
+.seat-group { display: flex; flex-direction: column; align-items: center; gap: 2px; opacity: 0.45; transition: opacity 0.3s ease; }
+.seat-group.active { opacity: 1; }
+.seat-group .g-label { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: var(--muted); }
+.seat-group.a .g-label { color: var(--board-a); } .seat-group.b .g-label { color: var(--board-b); }
+.seat-group .g-cards { display: flex; gap: 2px; }
+.seat-hand-name {
+  font-family: var(--font-display), sans-serif; font-size: 10px; font-weight: 700; color: var(--text);
+  background: var(--plate); border-radius: 8px; padding: 2px 7px; margin-bottom: 3px; white-space: nowrap;
+}
+.seat.won .plate { border-color: var(--glow); box-shadow: 0 0 0 1.5px var(--glow), 0 0 30px rgba(91, 224, 138, 0.45); }
+
+/* per-pot decisions */
+.dft-pot-call { border: 1px solid var(--line); border-radius: 14px; padding: 12px 12px 10px; margin-bottom: 10px; text-align: left; }
+.dft-pot-call.done { border-color: rgba(91, 224, 138, 0.35); }
+.dft-pot-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.dft-pot-name { font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 15px; }
+.dft-pot-amt { font-family: var(--font-mono), monospace; font-weight: 700; color: var(--gold); }
+.dft-pot-btns { display: flex; flex-direction: column; gap: 8px; }
+.dft-run { width: 100%; padding: 12px; border-radius: 10px; background: var(--glow); color: #0a231a; font-weight: 700; font-family: var(--font-display), sans-serif; font-size: 15px; }
+.dft-decide-surrender { margin-top: 0; display: flex; flex-direction: column; gap: 2px; }
+.dft-decide-surrender small { font-size: 10px; color: var(--muted); font-weight: 500; }
+.dft-pot-locked { font-size: 12px; color: var(--glow); font-weight: 600; text-align: center; padding: 6px 0 2px; }
+.dft-pot-locked .tick { color: var(--glow); }
+.dft-decide-card { max-width: 380px; }
+.dft-decide-card .dft-decide-stakes { margin-bottom: 10px; }
+
+@media (max-width: 640px) {
+  .sd-panel { padding: 10px 10px 12px; max-height: 44dvh; border-radius: 14px; }
+  .sd-title { font-size: 16px; }
+  .sd-row { grid-template-columns: minmax(48px, 1fr) auto minmax(0, 2fr); gap: 8px; padding: 6px 8px; }
+  .sd-row .sd-note { grid-column: 3; justify-self: end; }
+  .sd-name { font-size: 12px; }
+  .sd-label { font-size: 12px; }
+  .sd-foot { font-size: 12.5px; }
+  .pot-fly { font-size: 15px; padding: 5px 12px; top: 36%; }
+  .dealer-puck { top: 36%; width: 26px; height: 26px; font-size: 12px; }
+}
+@media (max-width: 640px) {
+  /* the dock's plate is one slim line so the side seats clear the dock */
+  .hand-dock .seat.inline .plate { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 3px 10px; }
+  .hand-dock .seat.inline .plate .name { font-size: 12px; }
+  .hand-dock .seat.inline .plate .stack { font-size: 13px; }
+  .hand-dock .seat.inline .plate .timer-track { position: absolute; left: 8px; right: 8px; bottom: 2px; margin: 0; }
+  .hand-dock .seat.inline .plate .badge { top: -9px; }
+  /* revealed opponents on a phone: six faces in a fan, no groups */
+  .seat-cards.fan .card:not(.back) { margin-left: calc(var(--w) * -0.42); }
+}
+.away-tag { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); margin-top: 2px; }

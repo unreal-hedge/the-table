@@ -16,6 +16,7 @@ import { useRoom, ConnectionStatus } from "@/hooks/use-room";
 import { GameSetupForm } from "./GameSetupForm";
 import { TableView } from "./TableView";
 import { EndScreen } from "./EndScreen";
+import { clearStoredLogin } from "@/lib/login";
 
 interface Props {
   room: string;
@@ -71,6 +72,12 @@ export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
     });
   }, [create, isHost, r.status, r.state, r.send, myId, keyword]);
   const memberNames = r.members.map((m) => m.name).join(", ") || "just you";
+  const gameRunning = r.state != null && r.state.phase !== "ended";
+  // 1E.4: the stored login lives for the session; once a session has ended
+  // and nothing replaced it (no restart), the next visit needs a fresh login
+  useEffect(() => {
+    if (r.summary && !gameRunning && summaryDismissed) clearStoredLogin();
+  }, [r.summary, gameRunning, summaryDismissed]);
 
   // ----- kicked: another device took this seat (spec 8.2) -----
   if (r.kicked) {
@@ -101,7 +108,6 @@ export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
   }
 
   // ----- waiting room (no game yet, or last one ended) -----
-  const gameRunning = r.state != null && r.state.phase !== "ended";
   if (!gameRunning) {
     return (
       <div className="lobby">
@@ -181,6 +187,7 @@ export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
       onDeclare={(potIndex, decision) => r.send.declare(potIndex, decision)}
       onAddChips={isHost ? (id, amt) => r.send.host({ kind: "addChips", playerId: id, amount: amt }) : undefined}
       onSitToggle={isHost ? (id, out) => r.send.host({ kind: "sitOut", playerId: id, out }) : undefined}
+      onSitSelf={(out) => r.send.sitToggle(out)}
       onRequestSeat={(seat) => r.send.requestSeat(seat)}
       onSeatRequest={isHost ? (playerId, action, stack) => r.send.host({ kind: "seatRequest", playerId, action, stack }) : undefined}
       onRequestChips={(amount) => r.send.requestChips(amount)}
