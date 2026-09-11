@@ -364,21 +364,6 @@ input { font: inherit; color: var(--text); }
 .seat.empty.requestable .empty-plate { border-color: rgba(217, 164, 65, 0.5); }
 .seat.empty.requestable:hover .empty-plate { border-color: var(--gold); background: rgba(217, 164, 65, 0.08); }
 
-/* Admin seat-request queue (item 2). */
-.seat-requests {
-  position: absolute; left: 16px; bottom: 16px; z-index: 20; max-width: 340px;
-  background: rgba(10, 14, 12, 0.92); border: 1px solid var(--line); border-radius: 12px;
-  padding: 12px 14px; font-size: 13px;
-}
-.seat-requests .sr-title { font-weight: 700; margin-bottom: 8px; color: var(--gold); }
-.seat-requests .sr-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
-.seat-requests .sr-name { color: var(--text); }
-.seat-requests .sr-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-.seat-requests .sr-btns button {
-  font-size: 12px; padding: 5px 10px; border-radius: 7px;
-  border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer;
-}
-.seat-requests .sr-btns button:hover { border-color: var(--gold); }
 .timer-track { height: 3px; border-radius: 2px; background: rgba(242, 236, 221, 0.12);
   margin-top: 6px; overflow: hidden; }
 .timer-fill { height: 100%; background: var(--glow); border-radius: 2px;
@@ -448,16 +433,6 @@ input { font: inherit; color: var(--text); }
 }
 .log-strip div { padding: 1px 0; }
 .log-strip .hand-mark { color: var(--gold); }
-/* z 20: must stay clickable above the pause veil (z 15) — the Resume
-   button lives here, and a veil that eats it locks the game forever */
-.side-controls { position: absolute; top: 16px; right: 16px; display: flex;
-  flex-direction: column; gap: 8px; z-index: 20; }
-.side-controls button {
-  background: var(--plate); border: 1px solid var(--line); border-radius: 9px;
-  padding: 9px 16px; font-size: 13px; font-weight: 500; text-align: right;
-  backdrop-filter: blur(4px);
-}
-.side-controls button:hover { border-color: var(--muted); }
 .title-corner { position: absolute; top: 18px; left: 22px;
   font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 19px; }
 .title-corner .suit { color: var(--gold); }
@@ -586,9 +561,6 @@ input { font: inherit; color: var(--text); }
   .net-corner { top: 56px; left: 15px; gap: 4px; }
   .conn-pill { font-size: 10px; padding: 3px 9px; }
   .room-line { font-size: 10px; }
-  .side-controls { top: 10px; right: 10px; gap: 6px; }
-  .side-controls button { padding: 7px 11px; font-size: 11px; border-radius: 8px; }
-
   .err-toast { bottom: 190px; width: max-content; max-width: 90vw; font-size: 12px; }
   .chat-fab { bottom: 200px; left: 10px; width: 42px; height: 42px; font-size: 17px; }
   .chat-panel { bottom: 200px; left: 10px; max-height: 38vh; }
@@ -627,4 +599,98 @@ input { font: inherit; color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+/* ============ MENU CLUSTER + SHEET (KABIR-TODO #1, #2) ============ */
+/* One top-right cluster replaces the 7-button admin column: a pulsing
+   Requests pill (admins, only while something is pending) + a menu button.
+   Nothing here can overlap a seat; the menu opens a dismissible sheet. */
+.menu-cluster { position: absolute; top: 14px; right: 14px; z-index: 20; display: flex; gap: 8px; align-items: center; }
+.menu-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--plate); border: 1px solid var(--line); border-radius: 20px;
+  padding: 8px 14px; font-size: 13px; font-weight: 600; backdrop-filter: blur(4px);
+  transition: border-color 0.15s ease;
+}
+.menu-pill:hover { border-color: var(--muted); }
+.menu-pill.alert { color: var(--gold); border-color: rgba(217, 164, 65, 0.55); animation: pillPulse 1.6s ease infinite; }
+.menu-pill.alert b { background: var(--gold); color: #1a1408; border-radius: 10px; padding: 0 7px; font-size: 12px; }
+@keyframes pillPulse { 50% { box-shadow: 0 0 0 5px rgba(217, 164, 65, 0.16); } }
+.sheet-veil { position: absolute; inset: 0; z-index: 30; background: rgba(6, 9, 8, 0.45); }
+.sheet {
+  position: absolute; top: 14px; right: 14px;
+  width: min(360px, calc(100vw - 28px)); max-height: min(70dvh, 560px);
+  display: flex; flex-direction: column;
+  background: rgba(10, 14, 12, 0.97); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); overflow: hidden;
+  animation: sheetIn 0.18s ease both;
+}
+@keyframes sheetIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.sheet-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 16px;
+}
+.sheet-head .close { color: var(--muted); font-size: 16px; }
+.sheet-body { overflow-y: auto; padding: 8px 10px 12px; scrollbar-width: thin; }
+.sheet-note { font-size: 12px; color: var(--muted); padding: 6px 8px 10px; }
+.sheet-group { padding: 4px 0 8px; }
+.sheet-group + .sheet-group { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
+.sheet-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding: 2px 8px 6px; }
+.sheet-item {
+  display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px;
+  text-align: left; padding: 12px 10px; border-radius: 10px; font-size: 14px; font-weight: 500;
+}
+.sheet-item:hover { background: rgba(242, 236, 221, 0.06); }
+.sheet-item.danger { color: var(--danger); }
+.sheet-item .hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* requests inside the sheet */
+.rq-row { padding: 10px 8px; border-top: 1px solid var(--line); }
+.rq-row:first-child { border-top: none; }
+.rq-name { font-size: 14px; margin-bottom: 8px; }
+.rq-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.rq-btns button { font-size: 12px; padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line); }
+.rq-btns button:hover { border-color: var(--gold); }
+.rq-btns button.ok { border-color: rgba(91, 224, 138, 0.5); color: var(--glow); }
+
+/* ============ DIALOG (KABIR-TODO #6) ============ */
+.dialog-veil {
+  position: absolute; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: rgba(6, 9, 8, 0.62); backdrop-filter: blur(3px); padding: 16px;
+}
+.dialog-card {
+  width: min(360px, 100%);
+  background: linear-gradient(180deg, var(--room-2), var(--room));
+  border: 1px solid var(--line); border-radius: 18px; padding: 22px 20px 18px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); animation: sheetIn 0.18s ease both;
+}
+.dialog-card h3 { font-family: var(--font-display), sans-serif; font-size: 20px; font-weight: 700; }
+.dialog-msg { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin-top: 8px; }
+.dialog-field { display: block; margin-top: 16px; }
+.dialog-field span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+.dialog-field input {
+  width: 100%; background: rgba(242, 236, 221, 0.05); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 14px; font-family: var(--font-mono), monospace;
+  font-size: 20px; font-weight: 600; color: var(--gold);
+}
+.dialog-actions { display: flex; gap: 10px; margin-top: 20px; }
+.dialog-btn { flex: 1; padding: 13px; border-radius: 10px; font-weight: 600; font-size: 15px; border: 1px solid var(--line); }
+.dialog-btn.ghost { color: var(--muted); }
+.dialog-btn.primary { background: var(--glow); color: #0a231a; border-color: transparent; }
+.dialog-btn.danger { background: var(--danger); color: #fff; border-color: transparent; }
+.dialog-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* spectators: no action bar (#4) — a slim dealer-log strip only, desktop */
+.spectator-strip {
+  position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 18px 16px;
+  background: linear-gradient(transparent, rgba(8, 11, 9, 0.92) 32%);
+}
+.spectator-strip .log-strip { max-height: 72px; }
+.show-btn { position: absolute; bottom: 130px; right: 16px; z-index: 20; }
+@media (max-width: 1000px) { .spectator-strip { display: none; } }
+@media (max-width: 640px) {
+  .sheet { top: 10px; right: 10px; left: 10px; width: auto; max-height: 62dvh; }
+  .menu-cluster { top: 10px; right: 10px; gap: 6px; }
+  .menu-pill { padding: 7px 11px; font-size: 12px; }
+  .show-btn { bottom: 200px; }
 }

@@ -13,12 +13,14 @@ import { DftDecision, GameState, LedgerRow, PlayerAction, Variant } from "@/engi
 import { ChatEntry } from "@shared/protocol";
 import { Seat } from "./Seat";
 import { CardFace } from "./CardFace";
-import { ActionBar } from "./ActionBar";
+import { ActionBar, LogStrip } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
 import { DftPicking } from "./DftPicking";
 import { DftDecisions } from "./DftDecisions";
 import { DftReveal } from "./DftReveal";
+import { Sheet } from "./Sheet";
+import { Dialog, DialogSpec } from "./Dialog";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
@@ -44,10 +46,11 @@ interface Props {
   chat?: ChatEntry[];            // online: room chat (bubbles + panel)
   myId?: string;                 // online: for styling own chat lines
   onChat?: (text: string) => void;
-  corner?: ReactNode;            // online: connection pill + room line
+  connPill?: ReactNode;          // online: connection status pill (top-left corner)
+  roomLine?: string;             // online: "in room: …" presence (shown in the menu sheet)
   overlay?: ReactNode;           // online: disconnect veil / error toast
   onAct: (a: PlayerAction, amount?: number) => void;
-  onTimeBank?: () => void;       // absent → button hidden (server clock lands in Step 6)
+  onTimeBank?: () => void;       // absent → button hidden
   onShow: () => void;
   onPause?: () => void;
   onEnd?: () => void;
@@ -66,7 +69,7 @@ interface Props {
 
 export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
-  connectedIds, chat, myId, onChat, corner, overlay,
+  connectedIds, chat, myId, onChat, connPill, roomLine, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
   onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
   onRequestSeat, onSeatRequest, onRequestChips, onChipRequest, onDealNext, onRestart,
@@ -75,9 +78,13 @@ export function TableView({
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [chatSeenCount, setChatSeenCount] = useState(0);
+  // the compact top-right menu + the admin requests queue live in one sheet
+  // slot (KABIR-TODO #1, #2); every prompt/confirm is an in-app dialog (#6)
+  const [sheet, setSheet] = useState<"menu" | "requests" | null>(null);
+  const [dialog, setDialog] = useState<DialogSpec | null>(null);
 
   // display-only countdown tick (timeout decisions live elsewhere:
-  // hotseat → LocalGame's loop; online → the server, Step 6)
+  // hotseat → LocalGame's loop; online → the server)
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 200);
@@ -108,6 +115,7 @@ export function TableView({
   }
   const unreadChat = (chat?.length ?? 0) - chatSeenCount;
 
+  const seated = mode === "hotseat" || mySeat != null; // spectators get no action bar (#4)
   const myTurn = mode === "hotseat" || (mySeat != null && s.playerToAct === mySeat);
   const canShow = mode === "hotseat"
     ? s.canShowSeat != null
@@ -127,40 +135,36 @@ export function TableView({
         !dec.lockedSeats.some((l) => l.seat === mySeat && l.potIndex === c.potIndex)
     );
 
+  const requestCount = (isHost ? (s.seatRequests?.length ?? 0) + (s.chipRequests?.length ?? 0) : 0);
+  const closeSheet = () => setSheet(null);
+  const modeLabel = s.variant === "dft" ? "Hold'em" : "Double Flop";
+
   return (
     <div className="scene">
       <div className="title-corner">The Table <span className="suit">♠</span></div>
       <div className="blind-corner mono">
         blinds {fmt(s.config.smallBlind)}/{fmt(s.config.bigBlind)} · hand #{s.handNumber}
       </div>
-      {corner}
+      {(connPill || !seated) && (
+        <div className="net-corner">
+          {connPill}
+          {mode === "online" && !seated && (
+            <span className="room-line spectate-note">watching — not seated</span>
+          )}
+        </div>
+      )}
 
-      <div className="side-controls">
-        {isHost && onPause && (
-          <button onClick={onPause}>{s.phase === "paused" ? "Resume" : "Pause"}</button>
-        )}
-        <button onClick={() => setShowLedger(true)}>Ledger</button>
-        {mode === "online" && mySeat != null && onRequestChips && (
-          <button onClick={() => {
-            const v = window.prompt("Rebuy — how many chips? (admin must approve)", String(s.config.defaultBuyIn));
-            const a = v == null ? NaN : Number(v);
-            if (Number.isFinite(a) && a > 0) onRequestChips(a);
-          }}>Request chips</button>
-        )}
-        {isHost && onSetMode && (
-          <button onClick={() => onSetMode(s.variant === "dft" ? "nlhe" : "dft")}>
-            {s.variant === "dft" ? "Switch to Hold'em" : "Switch to Double Flop"}
+      {/* Compact top-right cluster: an alert pill for pending requests (admins)
+          and ONE menu button. Nothing here ever overlaps a seat (#1). */}
+      <div className="menu-cluster">
+        {requestCount > 0 && (
+          <button className="menu-pill alert" onClick={() => setSheet("requests")}>
+            Requests <b>{requestCount}</b>
           </button>
         )}
-        {isHost && onDealNext && s.phase === "handEnded" && (
-          <button onClick={onDealNext}>Deal next hand</button>
-        )}
-        {isHost && onRestart && (
-          <button onClick={() => {
-            if (window.confirm("Restart? Settles the current session and deals a fresh game with the same seated players.")) onRestart();
-          }}>Restart game</button>
-        )}
-        {isHost && onEnd && <button onClick={onEnd}>End session</button>}
+        <button className="menu-pill" onClick={() => setSheet("menu")} aria-label="Table menu">
+          <span aria-hidden="true">☰</span> Table
+        </button>
       </div>
 
       <div className="table-wrap">
@@ -215,52 +219,20 @@ export function TableView({
         );
       })}
 
-      {/* Admin request queue: seat requests (item 2) + rebuy requests (item 3). */}
-      {isHost && ((s.seatRequests?.length ?? 0) > 0 || (s.chipRequests?.length ?? 0) > 0) && (
-        <div className="seat-requests">
-          <div className="sr-title">Requests</div>
-          {onSeatRequest && s.seatRequests?.map((rq) => (
-            <div key={`s${rq.playerId}`} className="sr-row">
-              <span className="sr-name">{rq.name} → seat {rq.seat + 1}{rq.ignored ? " · ignored" : ""}</span>
-              <div className="sr-btns">
-                <button onClick={() => onSeatRequest(rq.playerId, "accept")}>Accept</button>
-                <button onClick={() => {
-                  const val = window.prompt(`Buy-in for ${rq.name}?`, String(s.config.defaultBuyIn));
-                  const amt = val == null ? NaN : Number(val);
-                  if (Number.isFinite(amt) && amt > 0) onSeatRequest(rq.playerId, "accept", amt);
-                }}>Edit stack</button>
-                <button onClick={() => onSeatRequest(rq.playerId, "reject")}>Reject</button>
-                {!rq.ignored && <button onClick={() => onSeatRequest(rq.playerId, "ignore")}>Ignore</button>}
-              </div>
-            </div>
-          ))}
-          {onChipRequest && s.chipRequests?.map((rq) => (
-            <div key={`c${rq.playerId}`} className="sr-row">
-              <span className="sr-name">{rq.name} → rebuy +{fmt(rq.amount)}</span>
-              <div className="sr-btns">
-                <button onClick={() => onChipRequest(rq.playerId, "approve")}>Approve</button>
-                <button onClick={() => {
-                  const val = window.prompt(`Rebuy amount for ${rq.name}?`, String(rq.amount));
-                  const amt = val == null ? NaN : Number(val);
-                  if (Number.isFinite(amt) && amt > 0) onChipRequest(rq.playerId, "approve", amt);
-                }}>Edit</button>
-                <button onClick={() => onChipRequest(rq.playerId, "reject")}>Reject</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {canShow && (
-        <div className="side-controls" style={{ top: "auto", bottom: 130 }}>
-          <button onClick={onShow}>Show winning cards</button>
-        </div>
+        <button className="menu-pill show-btn" onClick={onShow}>Show winning cards</button>
       )}
 
-      <ActionBar state={s} enabled={myTurn}
-        onAct={(a, amt) => { onAct(a, amt); setPeekSeat(null); }}
-        onTimeBank={onTimeBank}
-      />
+      {/* Seated players get the action bar; spectators never see disabled
+          betting buttons (#4) — just the dealer log on wide screens. */}
+      {seated ? (
+        <ActionBar state={s} enabled={myTurn}
+          onAct={(a, amt) => { onAct(a, amt); setPeekSeat(null); }}
+          onTimeBank={onTimeBank}
+        />
+      ) : (
+        <div className="spectator-strip"><LogStrip log={s.log} /></div>
+      )}
 
       {/* Picking overlay: only a viewer who is actually picking sees it. An
           active picker gets the interactive splitter; one who's locked in gets
@@ -356,6 +328,127 @@ export function TableView({
           onClose={() => setShowLedger(false)}
         />
       )}
+
+      {/* ---- the table menu: everyone's controls + the admin group (#1) ---- */}
+      {sheet === "menu" && (
+        <Sheet title="Table" onClose={closeSheet}>
+          {roomLine && <div className="sheet-note">{roomLine}</div>}
+          <div className="sheet-group">
+            <button className="sheet-item" onClick={() => { closeSheet(); setShowLedger(true); }}>
+              Ledger <span className="hint">session</span>
+            </button>
+            {mode === "online" && mySeat != null && onRequestChips && (
+              <button className="sheet-item" onClick={() => {
+                closeSheet();
+                setDialog({
+                  title: "Request chips",
+                  message: "An admin approves it; the chips land between hands.",
+                  input: { label: "Chips to add", initial: s.config.defaultBuyIn, min: 1, max: s.config.maxBuyIn, step: 50 },
+                  confirmLabel: "Send request",
+                  onConfirm: (v) => { if (v) onRequestChips(v); },
+                });
+              }}>
+                Request chips <span className="hint">rebuy / top-up</span>
+              </button>
+            )}
+            {requestCount > 0 && (
+              <button className="sheet-item" onClick={() => setSheet("requests")}>
+                Requests <span className="hint">{requestCount} pending</span>
+              </button>
+            )}
+          </div>
+          {isHost && (
+            <div className="sheet-group">
+              <div className="sheet-label">Admin</div>
+              {onPause && (
+                <button className="sheet-item" onClick={() => { closeSheet(); onPause(); }}>
+                  {s.phase === "paused" ? "Resume" : "Pause"} <span className="hint">freeze the clock</span>
+                </button>
+              )}
+              {onDealNext && s.phase === "handEnded" && (
+                <button className="sheet-item" onClick={() => { closeSheet(); onDealNext(); }}>
+                  Deal next hand <span className="hint">table is parked</span>
+                </button>
+              )}
+              {onSetMode && (
+                <button className="sheet-item" onClick={() => { closeSheet(); onSetMode(s.variant === "dft" ? "nlhe" : "dft"); }}>
+                  Switch to {modeLabel} <span className="hint">from next hand</span>
+                </button>
+              )}
+              {onRestart && (
+                <button className="sheet-item danger" onClick={() => {
+                  closeSheet();
+                  setDialog({
+                    title: "Restart the game?",
+                    message: "Settles the current session into the ledger and deals a fresh game with the same seated players and fresh buy-ins.",
+                    confirmLabel: "Restart", danger: true,
+                    onConfirm: () => onRestart(),
+                  });
+                }}>
+                  Restart game <span className="hint">settle + redeal</span>
+                </button>
+              )}
+              {onEnd && (
+                <button className="sheet-item danger" onClick={() => {
+                  closeSheet();
+                  setDialog({
+                    title: "End the session?",
+                    message: "Stops the game and finalises everyone's ledger.",
+                    confirmLabel: "End session", danger: true,
+                    onConfirm: () => onEnd(),
+                  });
+                }}>
+                  End session <span className="hint">final ledger</span>
+                </button>
+              )}
+            </div>
+          )}
+        </Sheet>
+      )}
+
+      {/* ---- admin request queue: seat requests (item 2) + rebuys (item 3) (#2) ---- */}
+      {sheet === "requests" && isHost && (
+        <Sheet title="Requests" onClose={closeSheet}>
+          {requestCount === 0 && <div className="sheet-note">Nothing pending.</div>}
+          {onSeatRequest && s.seatRequests?.map((rq) => (
+            <div key={`s${rq.playerId}`} className="rq-row">
+              <div className="rq-name">{rq.name} wants seat {rq.seat + 1}{rq.ignored ? " · ignored" : ""}</div>
+              <div className="rq-btns">
+                <button className="ok" onClick={() => onSeatRequest(rq.playerId, "accept")}>Accept · {fmt(s.config.defaultBuyIn)}</button>
+                <button onClick={() => {
+                  setDialog({
+                    title: `Buy-in for ${rq.name}`,
+                    input: { label: "Starting stack", initial: s.config.defaultBuyIn, min: s.config.minBuyIn, max: s.config.maxBuyIn, step: 50 },
+                    confirmLabel: "Seat them",
+                    onConfirm: (v) => { if (v) onSeatRequest(rq.playerId, "accept", v); },
+                  });
+                }}>Edit stack</button>
+                <button onClick={() => onSeatRequest(rq.playerId, "reject")}>Reject</button>
+                {!rq.ignored && <button onClick={() => onSeatRequest(rq.playerId, "ignore")}>Ignore</button>}
+              </div>
+            </div>
+          ))}
+          {onChipRequest && s.chipRequests?.map((rq) => (
+            <div key={`c${rq.playerId}`} className="rq-row">
+              <div className="rq-name">{rq.name} asks for +{fmt(rq.amount)} chips</div>
+              <div className="rq-btns">
+                <button className="ok" onClick={() => onChipRequest(rq.playerId, "approve")}>Approve</button>
+                <button onClick={() => {
+                  setDialog({
+                    title: `Rebuy for ${rq.name}`,
+                    input: { label: "Chips to add", initial: rq.amount, min: 1, max: s.config.maxBuyIn, step: 50 },
+                    confirmLabel: "Approve",
+                    onConfirm: (v) => { if (v) onChipRequest(rq.playerId, "approve", v); },
+                  });
+                }}>Edit amount</button>
+                <button onClick={() => onChipRequest(rq.playerId, "reject")}>Reject</button>
+              </div>
+            </div>
+          ))}
+        </Sheet>
+      )}
+
+      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
 
       {overlay}
     </div>

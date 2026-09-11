@@ -65,7 +65,7 @@ export function Lobby({ devLocal, onStartLocal, onJoinOnline, onCreateOnline }: 
     <div className="lobby">
       <div className="lobby-card">
         <h1>The Table <span className="suit">♠</span></h1>
-        <p className="sub">Private cash game · No-Limit Hold&apos;em · chips are points, settle up after</p>
+        <p className="sub">Private poker · Hold&apos;em &amp; Double Flop Tex · chips are points, settle up after</p>
 
         {devLocal && (
           <div className="mode-tabs" role="tablist">

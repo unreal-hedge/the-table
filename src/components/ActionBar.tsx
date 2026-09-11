@@ -84,7 +84,7 @@ export function ActionBar({ state: s, enabled = true, onAct, onTimeBank }: Props
   );
 }
 
-function LogStrip({ log }: { log: string[] }) {
+export function LogStrip({ log }: { log: string[] }) {
   return (
     <div className="log-strip" ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}>
       {log.map((line, i) => (

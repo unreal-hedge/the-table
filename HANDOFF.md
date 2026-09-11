@@ -315,9 +315,11 @@ From `CLAUDE.md` (hard-won) and these phases:
   on the server, `isAdmin()`; the client `isHost` comes from the server's `you`
   message, never guessed. Don't reintroduce a per-room "creator is host" flag.
 - **Login self-registers** (item 5): a character new to a room sets its keyword on
-  first login; a returning character must match or gets the single opaque
-  `Invalid login`. Keep the rejection message identical for exists/not-exists —
-  it's deliberate (no username enumeration).
+  first login; a returning character must match or gets `Invalid login`.
+  **Username enumeration IS possible now** — a known name + wrong keyword is
+  rejected while an unknown name is admitted as a spectator — and that is
+  accepted for a private game (Parth's call, KABIR-TODO #8). The old "no
+  enumeration" guarantee is gone; `test-online.ts` asserts the new behaviour.
 - **Fonts are self-hosted** via @fontsource (Google Fonts fetch breaks builds).
 - **Deploys:** push → Vercel redeploys the frontend automatically; the game
   server does **not** — run `npm run party:deploy` after touching `party/` or

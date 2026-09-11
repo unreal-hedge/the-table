@@ -149,17 +149,8 @@ export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
       chat={r.chat}
       myId={myId}
       onChat={(text) => r.send.chat(text)}
-      corner={
-        <div className="net-corner">
-          <ConnPill status={r.status} />
-          <span className="room-line">in room: {memberNames}</span>
-          {r.mySeat == null && (
-            <span className="room-line spectate-note">
-              watching as {myId} — not seated in this game
-            </span>
-          )}
-        </div>
-      }
+      connPill={<ConnPill status={r.status} />}
+      roomLine={`In room: ${memberNames}`}
       overlay={
         <>
           {r.lastError && <div className="err-toast">{r.lastError}</div>}
