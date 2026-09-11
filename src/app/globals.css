@@ -735,3 +735,141 @@ input { font: inherit; color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ============ BOARD TAGS (Double Flop) ============ */
+/* Board A is amber, Board B is sky — the SAME colours the dock's Hand A / Hand
+   B carry, so the pairing reads without the words. A selected dock group makes
+   its board glow. */
+.dft-board { --accent: var(--muted); border-radius: 14px; padding: 4px 8px 6px; transition: box-shadow 0.25s ease, background 0.25s ease; }
+.dft-board.a { --accent: var(--board-a); }
+.dft-board.b { --accent: var(--board-b); }
+.dft-board-tag { display: inline-flex; align-items: center; gap: 6px; color: rgba(244, 238, 224, 0.7); font-weight: 600; }
+.dft-board-tag b {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px;
+  background: var(--accent); color: #1a1408; font-family: var(--font-display), sans-serif; font-size: 12px; font-weight: 800;
+}
+.dft-board.focus { background: rgba(0, 0, 0, 0.22); box-shadow: 0 0 0 2px var(--accent), 0 0 28px color-mix(in srgb, var(--accent) 55%, transparent); }
+.my-hand-name {
+  position: absolute; transform: translate(-50%, 52px); z-index: 7; pointer-events: none;
+  font-family: var(--font-display), sans-serif; font-size: 13px; font-weight: 700; color: var(--text);
+  background: var(--plate); border: 1px solid var(--line); border-radius: 10px; padding: 3px 10px; white-space: nowrap;
+}
+.phase-banner {
+  position: absolute; left: 50%; top: 66%; transform: translateX(-50%); z-index: 12;
+  font-size: 13px; color: var(--text); background: var(--plate); border: 1px solid var(--line);
+  border-radius: 12px; padding: 8px 16px; white-space: nowrap; max-width: 92vw; text-align: center;
+}
+
+/* ============ HAND DOCK — my three hands (readability 2.2–2.4) ============ */
+.scene { --bar-h: 122px; }
+.hand-dock {
+  position: absolute; left: 50%; bottom: var(--bar-h); transform: translateX(-50%); z-index: 9;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.hand-dock.free { bottom: 14px; }
+.dock-groups { display: flex; gap: 14px; align-items: flex-end; }
+.dock-group {
+  --accent: var(--muted);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 8px 10px 8px; border-radius: 14px; min-width: 150px;
+  background: rgba(12, 9, 10, 0.72); border: 1px solid var(--line); border-top: 2px solid var(--accent);
+  backdrop-filter: blur(4px); transition: box-shadow 0.2s ease;
+}
+.dock-group.a { --accent: var(--board-a); }
+.dock-group.b { --accent: var(--board-b); }
+.dock-group.tex { --accent: var(--tex); }
+.dock-group.active { box-shadow: 0 0 0 1.5px var(--accent); }
+.dock-label { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+.dock-cards { display: flex; gap: 6px; }
+.dock-cell { border-radius: 9px; line-height: 0; transition: transform 0.15s ease; cursor: pointer; }
+.dock-cell:disabled { cursor: default; }
+.dock-cell.selected { outline: 2.5px solid var(--glow); outline-offset: 3px; transform: translateY(-7px); }
+.dock-name {
+  font-family: var(--font-display), sans-serif; font-size: 13px; font-weight: 700; color: var(--text);
+  min-height: 17px; text-align: center; max-width: 168px; line-height: 1.2;
+}
+.dock-name.empty { color: var(--muted); font-weight: 500; font-size: 11px; }
+/* the plate under the dock is my seat, rendered inline */
+.hand-dock .seat.inline { position: static; transform: none; width: 168px; }
+.dock-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.dock-pick-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+.dock-timer { flex: 1; height: 6px; border-radius: 3px; background: rgba(242, 236, 221, 0.12); overflow: hidden; }
+.dock-timer-fill { height: 100%; background: var(--glow); transition: width 0.2s linear; }
+.dock-timer-fill.low { background: var(--danger); }
+.dock-lock {
+  padding: 12px 22px; border-radius: 10px; background: var(--glow); color: #0a231a;
+  font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 15px; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(91, 224, 138, 0.3);
+}
+.dock-lock:hover { background: #74eb9e; }
+.dock-locked { font-size: 13px; color: var(--glow); font-weight: 600; background: var(--plate); padding: 8px 14px; border-radius: 10px; border: 1px solid rgba(91, 224, 138, 0.35); }
+.dock-hint { font-size: 11px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .scene { --bar-h: 128px; }
+  /* Double Flop on a phone: the felt is the top ~60%, the dock the bottom */
+  .scene.dft .table-wrap { top: 8%; height: 56%; width: 90vw; aspect-ratio: auto; transform: translateX(-50%); }
+  .scene.dft .table-brand { top: 12%; }
+  .scene.dft .round-tag { top: 19%; }
+  .scene.dft .dft-boards { top: 50%; gap: 8px; }
+  .dft-board { padding: 2px 6px 4px; }
+  .dft-board-tag { font-size: 9px; gap: 5px; }
+  .dft-board-tag b { width: 15px; height: 15px; font-size: 10px; }
+  .dft-cards { gap: 3px; min-height: 54px; }
+  .seat { width: 96px; }
+  .scene.dft .seat-cards { min-height: 0; }
+  .hand-dock .card { --w: 50px; }
+  .dock-groups { gap: 5px; align-items: stretch; }
+  .dock-group { min-width: 0; padding: 5px 5px 5px; border-radius: 11px; gap: 4px; }
+  .dock-cards { gap: 4px; }
+  .dock-label { font-size: 9px; letter-spacing: 0.12em; }
+  .dock-name { font-size: 11px; max-width: 108px; min-height: 26px; }
+  .dock-name.empty { font-size: 10px; }
+  .hand-dock .seat.inline { width: 200px; }
+  .hand-dock .seat.inline .plate { padding: 4px 8px 5px; }
+  .dock-lock { padding: 11px 16px; font-size: 14px; }
+  .phase-banner { top: 60%; font-size: 12px; }
+  .my-hand-name { font-size: 11px; transform: translate(-50%, 44px); }
+}
+
+/* ============ PHONE LAYOUT FIXES (seat ring vs chrome) ============ */
+/* opponents' hidden cards fan into a tight stack so a 6-card DFT hand is
+   one row high on every seat; revealed faces keep their full spacing */
+.seat-cards.fan { flex-wrap: nowrap; gap: 0; }
+.seat-cards.fan .card { margin-left: calc(var(--w) * -0.55); }
+.seat-cards.fan .card:first-child { margin-left: 0; }
+/* the top row of seats hangs its cards BELOW the plate, toward the felt */
+.seat.top { display: flex; flex-direction: column-reverse; }
+.seat.top .seat-cards { margin-bottom: 0; margin-top: 4px; }
+@media (max-width: 640px) {
+  .scene { --bar-h: 168px; }
+  /* one chrome row: title left, connection pill right (before the menu) */
+  .blind-corner { top: 33px; font-size: 10px; }
+  .net-corner { top: 11px; left: auto; right: 112px; gap: 4px; align-items: flex-end; }
+  .conn-pill { font-size: 10px; padding: 3px 8px; gap: 5px; }
+  .conn-pill .dot { width: 6px; height: 6px; }
+  .spectate-note { display: none; }
+  .spectator-strip { display: block; padding: 8px 12px 12px; }
+  .spectator-strip .log-strip { display: none; }
+  .spectator-strip::after {
+    content: "Watching · not seated — tap an empty seat to ask in";
+    display: block; text-align: center; font-size: 12px; color: var(--gold);
+    background: var(--plate); border: 1px solid rgba(224, 176, 84, 0.4); border-radius: 12px; padding: 8px 12px;
+  }
+}
+
+/* desktop Double Flop: a slightly smaller, higher felt leaves the dock its own band */
+@media (min-width: 641px) {
+  .scene.dft .table-wrap { width: min(64vw, 920px); top: 40%; }
+  .scene.dft .dft-boards { top: 47%; }
+}
+
+/* chat lives in the top-right cluster now (it used to float over the dock) */
+.menu-cluster .chat-fab { position: static; width: auto; height: auto; padding: 7px 11px; font-size: 15px; bottom: auto; left: auto; }
+.menu-cluster .chat-fab .chat-dot { top: 4px; right: 4px; width: 8px; height: 8px; }
+.chat-panel { bottom: auto; left: auto; top: 60px; right: 14px; max-height: 52vh; }
+@media (max-width: 640px) {
+  .menu-cluster .chat-fab { padding: 6px 9px; font-size: 14px; }
+  .chat-panel { top: 52px; right: 10px; left: 10px; width: auto; max-height: 48vh; }
+}
+@media (min-width: 641px) { .scene.dft .round-tag { top: 17%; } .scene.dft .table-brand { top: 9%; } }

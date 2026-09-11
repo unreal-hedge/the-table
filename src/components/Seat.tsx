@@ -1,31 +1,41 @@
 "use client";
 import { SeatView } from "@/engine/types";
 import { fmt } from "@/engine/manager";
-import { CardFace } from "./CardFace";
+import { CardFace, CardSize } from "./CardFace";
 
 interface Props {
   view: SeatView;
-  x: number; y: number;          // % position on the scene
-  betX: number; betY: number;    // % position of their bet chips
+  x?: number; y?: number;        // % position on the scene (absent = render inline, e.g. inside the dock)
   timerPct: number | null;       // 0..1 remaining, only for the actor
   peeking: boolean;
   peekable?: boolean;            // hot-seat only; online has no peek flow
   offline?: boolean;             // online: no live connection (grace running)
   bubble?: string | null;        // recent chat line, floats above the seat
   backCount?: number;            // hidden-card count for opponents (2 NLHE, 6 DFT)
+  cardSize?: CardSize;           // xs for opponents, md for your own NLHE cards
+  hideCards?: boolean;           // the dock renders this seat's cards instead
+  visibleCards?: number;         // deal animation: how many cards have arrived so far
+  top?: boolean;                 // seat on the top rail: cards hang below the plate
+  fan?: boolean;                 // hidden cards stack into a tight fan (6 backs in one row)
   canRequest?: boolean;          // spectator may tap this empty seat to request it (item 2)
   onRequestSeat?: () => void;
   onPeek: () => void;
   winBadge: string | null;       // "WINS 4,200" etc.
 }
 
-export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = true, offline = false, bubble = null, backCount = 2, canRequest = false, onRequestSeat, onPeek, winBadge }: Props) {
+export function Seat({
+  view: v, x, y, timerPct, peeking, peekable = true, offline = false, bubble = null,
+  backCount = 2, cardSize = "xs", hideCards = false, visibleCards, top = false, fan = false,
+  canRequest = false, onRequestSeat, onPeek, winBadge,
+}: Props) {
+  const pos = x != null && y != null ? { left: `${x}%`, top: `${y}%` } : undefined;
+  const inline = pos === undefined;
   // Empty numbered slot (item 2): a spectator can tap it to ask for the seat.
   if (v.empty) {
     return (
       <div
         className={`seat empty${canRequest ? " requestable" : ""}`}
-        style={{ left: `${x}%`, top: `${y}%` }}
+        style={pos}
         onClick={canRequest ? onRequestSeat : undefined}
       >
         <div className="empty-plate">
@@ -38,42 +48,54 @@ export function Seat({ view: v, x, y, betX, betY, timerPct, peeking, peekable = 
   const showFaces = v.revealed || peeking;
   const badge = winBadge ?? v.lastAction;
   const badgeCls = winBadge ? "win" : v.folded ? "fold" : "";
+  const total = v.holeCards ? v.holeCards.length : backCount;
+  const count = Math.min(total, visibleCards ?? total);
   return (
-    <>
-      <div
-        className={`seat${v.isTurn ? " turn" : ""}${v.folded ? " folded" : ""}${v.sittingOut ? " out" : ""}`}
-        style={{ left: `${x}%`, top: `${y}%` }}
-      >
-        {bubble && <div className="chat-bubble">{bubble}</div>}
-        <div className="seat-cards">
+    <div
+      className={`seat${inline ? " inline" : ""}${top ? " top" : ""}${v.isTurn ? " turn" : ""}${v.folded ? " folded" : ""}${v.sittingOut ? " out" : ""}`}
+      style={pos}
+    >
+      {bubble && <div className="chat-bubble">{bubble}</div>}
+      {!hideCards && (
+        <div className={`seat-cards${fan && !showFaces ? " fan" : ""}`}>
           {/* online: server strips opponents' holeCards to null — still
               show backs, an in-hand player must LOOK in the hand */}
-          {v.inHand && (v.holeCards
-            ? v.holeCards.map((c, i) => <CardFace key={i} card={showFaces ? c : null} size="xs" />)
-            : Array.from({ length: backCount }, (_, i) => <CardFace key={i} card={null} size="xs" />))}
+          {(v.inHand || (v.revealed && v.holeCards)) && Array.from({ length: count }, (_, i) => (
+            <CardFace key={i} card={showFaces && v.holeCards ? v.holeCards[i] : null} size={cardSize} delay={i * 40} />
+          ))}
         </div>
-        <div className="plate">
-          {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
-          <div className="name">
-            {v.name}
-            {offline && !v.sittingOut && <span className="offline-tag">offline</span>}
+      )}
+      <div className="plate">
+        {badge && !v.sittingOut && <span className={`badge ${badgeCls}`}>{badge}</span>}
+        <div className="name">
+          {v.name}
+          {offline && !v.sittingOut && <span className="offline-tag">offline</span>}
+        </div>
+        <div className="stack">{v.sittingOut ? "sitting out" : fmt(v.stack)}</div>
+        {v.isTurn && timerPct != null && (
+          <div className="timer-track">
+            <div
+              className={`timer-fill${timerPct < 0.25 ? " low" : ""}`}
+              style={{ width: `${timerPct * 100}%` }}
+            />
           </div>
-          <div className="stack">{v.sittingOut ? "sitting out" : fmt(v.stack)}</div>
-          {v.isTurn && timerPct != null && (
-            <div className="timer-track">
-              <div
-                className={`timer-fill${timerPct < 0.25 ? " low" : ""}`}
-                style={{ width: `${timerPct * 100}%` }}
-              />
-            </div>
-          )}
-        </div>
-        {peekable && v.isTurn && v.inHand && !v.revealed && (
-          <button className="peek-btn" onClick={onPeek}>
-            {peeking ? "hide cards" : "peek at cards"}
-          </button>
         )}
       </div>
+      {peekable && v.isTurn && v.inHand && !v.revealed && (
+        <button className="peek-btn" onClick={onPeek}>
+          {peeking ? "hide cards" : "peek at cards"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The chips in front of a seat + the dealer button — positioned separately
+ *  from the seat box so the dock seat gets them too. */
+export function SeatExtras({ view: v, betX, betY }: { view: SeatView; betX: number; betY: number }) {
+  if (v.empty) return null;
+  return (
+    <>
       {v.betSize > 0 && (
         <div className="bet-chip" style={{ left: `${betX}%`, top: `${betY}%` }}>
           {fmt(v.betSize)}

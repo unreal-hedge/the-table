@@ -5,34 +5,72 @@
 //   hotseat: driven by a local GameManager (LocalGame)
 //   online:  driven by server-pushed GameState (OnlineGame)
 // Pure renderer: everything it knows arrives via props.
+//
+// Layout rules (readability pass):
+//  - POV rotation (1E.6): the viewer always sits at the BOTTOM; seats
+//    rotate around them; the dealer button follows its seat.
+//  - Double Flop: the viewer's six cards live in the HandDock at the
+//    bottom, always grouped HAND A | TEX | HAND B; the two boards sit
+//    stacked on the felt with matching A/B colours.
+//  - Phones get an explicit seat map (not the desktop ellipse) so the
+//    five-card board rows never collide with the side seats.
 // ============================================================
 
 import { ReactNode, useEffect, useState } from "react";
 import { fmt } from "@/engine/manager";
-import { DftDecision, GameState, LedgerRow, PlayerAction, Variant } from "@/engine/types";
+import { DftDecision, GameState, LedgerRow, PlayerAction, SeatView, Variant } from "@/engine/types";
 import { ChatEntry } from "@shared/protocol";
-import { Seat } from "./Seat";
+import { Seat, SeatExtras } from "./Seat";
 import { CardFace } from "./CardFace";
 import { ActionBar, LogStrip } from "./ActionBar";
 import { LedgerPanel } from "./LedgerPanel";
 import { ChatPanel } from "./ChatPanel";
-import { DftPicking } from "./DftPicking";
 import { DftDecisions } from "./DftDecisions";
 import { DftReveal } from "./DftReveal";
+import { HandDock } from "./HandDock";
 import { Sheet } from "./Sheet";
 import { Dialog, DialogSpec } from "./Dialog";
+import { labelHand } from "@/lib/handLabel";
 
 // how long a chat line floats as a bubble next to its sender's seat
 const BUBBLE_MS = 4500;
 
-// seat positions: ellipse in scene %, seat 0 at the bottom, clockwise
-function seatPos(i: number, n: number) {
-  const angle = Math.PI / 2 + (2 * Math.PI * i) / n; // start bottom
+/** [x, y] in scene %, display index 0 = the viewer at the bottom, clockwise. */
+type Pt = [number, number];
+// Phone maps: side rows sit ABOVE and BELOW the board band so a 5-card row
+// never touches a plate; the top pair clears the corner chrome.
+const PHONE_7: Pt[] = [[50, 62], [13, 56], [13, 21], [30, 12], [70, 12], [87, 21], [87, 56]];
+const PHONE_8: Pt[] = [[50, 73], [15, 61], [12, 36], [29, 14], [50, 10], [71, 14], [88, 36], [85, 61]];
+/** display indexes whose seats sit on the TOP rail (cards hang below the plate) */
+const TOP_ROW: Record<number, number[]> = { 7: [3, 4], 8: [3, 4, 5] };
+
+function seatPos(i: number, n: number, phone: boolean, variant: Variant) {
+  if (phone) {
+    const map = n === 7 ? PHONE_7 : n === 8 ? PHONE_8 : null;
+    if (map) {
+      const [x, y] = map[i];
+      const cy = variant === "dft" ? 36 : 44; // the felt's centre band
+      return { x, y, bx: x + (50 - x) * 0.42, by: y + (cy - y) * 0.42 };
+    }
+  }
+  const angle = Math.PI / 2 + (2 * Math.PI * i) / n; // start bottom, clockwise
   const x = 50 + 34 * Math.cos(angle);
   const y = 44 + 30 * Math.sin(angle);
   const bx = 50 + 20 * Math.cos(angle);
   const by = 45 + 16 * Math.sin(angle);
   return { x, y, bx, by };
+}
+
+function useIsPhone(): boolean {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const apply = () => setPhone(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return phone;
 }
 
 interface Props {
@@ -55,7 +93,8 @@ interface Props {
   onPause?: () => void;
   onEnd?: () => void;
   onSetMode?: (mode: Variant) => void; // host: switch NLHE <-> DFT (next hand)
-  onSubmitArrangement?: (order: number[]) => void;          // DFT picking (6b)
+  onDraftArrangement?: (order: number[]) => void;           // DFT working split (2.4)
+  onSubmitArrangement?: (order: number[]) => void;          // DFT picking lock (6b)
   onDeclare?: (potIndex: number, decision: DftDecision) => void; // DFT decisions (6b)
   onAddChips?: (id: string, amount: number) => void;
   onSitToggle?: (id: string, out: boolean) => void;
@@ -71,9 +110,10 @@ export function TableView({
   state: s, mode, mySeat = null, isHost, ledgerRows, clockOffsetMs = 0,
   connectedIds, chat, myId, onChat, connPill, roomLine, overlay,
   onAct, onTimeBank, onShow, onPause, onEnd, onSetMode,
-  onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
+  onDraftArrangement, onSubmitArrangement, onDeclare, onAddChips, onSitToggle,
   onRequestSeat, onSeatRequest, onRequestChips, onChipRequest, onDealNext, onRestart,
 }: Props) {
+  const phone = useIsPhone();
   const [showLedger, setShowLedger] = useState(false);
   const [peekSeat, setPeekSeat] = useState<number | null>(null);
   const [showChat, setShowChat] = useState(false);
@@ -82,6 +122,8 @@ export function TableView({
   // slot (KABIR-TODO #1, #2); every prompt/confirm is an in-app dialog (#6)
   const [sheet, setSheet] = useState<"menu" | "requests" | null>(null);
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
+  // the board a selected dock group plays lights up (A ↔ Hand A)
+  const [focusBoard, setFocusBoard] = useState<"a" | "b" | null>(null);
 
   // display-only countdown tick (timeout decisions live elsewhere:
   // hotseat → LocalGame's loop; online → the server)
@@ -92,6 +134,10 @@ export function TableView({
   }, []);
 
   const n = s.seats.length;
+  const isDft = s.variant === "dft" && !!s.dft;
+  // POV rotation (1E.6): I'm display index 0 (bottom); spectators see seat 1 there
+  const anchor = mySeat ?? 0;
+  const displayIndex = (seat: number) => (seat - anchor + n) % n;
   // deadlines are SERVER epoch ms — offset our clock so the bar reads true
   const displayNow = Date.now() + clockOffsetMs;
   const timerPct = s.turnDeadlineAt && s.turnStartedAt
@@ -120,27 +166,48 @@ export function TableView({
   const canShow = mode === "hotseat"
     ? s.canShowSeat != null
     : s.canShowSeat != null && s.canShowSeat === mySeat;
+  const me: SeatView | undefined = mySeat != null ? s.seats.find((x) => x.seat === mySeat) : undefined;
 
-  // DFT overlay gating: only a viewer who is actively picking / owes a decision
-  // gets the modal. Spectators + folded players must NEVER be stuck behind it —
-  // they watch the table.
-  const pk = s.dft?.subPhase === "picking" ? s.dft.picking : null;
+  // ---- Double Flop: my dock + the picking / decision phases ----
+  const pk = isDft && s.dft!.subPhase === "picking" ? s.dft!.picking : null;
   const iAmPicking = pk != null && mySeat != null && pk.seats.includes(mySeat);
   const iPickLocked = pk != null && mySeat != null && pk.lockedSeats.includes(mySeat);
-  const dec = s.dft?.subPhase === "decisions" ? s.dft.decisions : null;
+  const dec = isDft && s.dft!.subPhase === "decisions" ? s.dft!.decisions : null;
   const iOweDecision =
     dec != null && mySeat != null &&
     dec.contests.some(
       (c) => c.seats.includes(mySeat!) &&
         !dec.lockedSeats.some((l) => l.seat === mySeat && l.potIndex === c.potIndex)
     );
+  // the dock shows whenever I hold six cards this hand (through handEnded)
+  const dockCards = isDft && mode === "online" && me && !me.empty && me.holeCards && me.holeCards.length === 6 && !me.folded
+    ? me.holeCards : null;
+  const dockLocked = isDft && (iPickLocked || s.dft!.subPhase === "decisions" || s.phase === "handEnded");
+  const dockEditable = !!dockCards && s.phase === "inHand" && !dockLocked && !!onDraftArrangement &&
+    (s.dft!.subPhase === "betting" || (s.dft!.subPhase === "picking" && iAmPicking));
+  // during picking / decisions the betting buttons are meaningless — free the
+  // bottom of the screen for the dock's timer + LOCK
+  const showActionBar = seated && !(isDft && (s.dft!.subPhase === "picking" || s.dft!.subPhase === "decisions") && s.phase === "inHand");
 
   const requestCount = (isHost ? (s.seatRequests?.length ?? 0) + (s.chipRequests?.length ?? 0) : 0);
   const closeSheet = () => setSheet(null);
   const modeLabel = s.variant === "dft" ? "Hold'em" : "Double Flop";
 
+  // NLHE: name my own hand live too (pokernow-style)
+  const myNlheLabel = !isDft && me?.holeCards && me.holeCards.length === 2 && s.communityCards.length >= 3
+    ? labelHand(me.holeCards, s.communityCards) : null;
+
+  const boardRow = (tag: "a" | "b", cards: GameState["communityCards"]) => (
+    <div className={`dft-board ${tag}${focusBoard === tag ? " focus" : ""}`}>
+      <span className="dft-board-tag"><b>{tag.toUpperCase()}</b> Board {tag.toUpperCase()}</span>
+      <div className="dft-cards">
+        {cards.map((c, i) => <CardFace key={`${tag}${i}`} card={c} size={phone ? "sm" : "md"} delay={i * 90} />)}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="scene">
+    <div className={`scene${isDft ? " dft" : ""}${phone ? " phone" : ""}`}>
       <div className="title-corner">The Table <span className="suit">♠</span></div>
       <div className="blind-corner mono">
         blinds {fmt(s.config.smallBlind)}/{fmt(s.config.bigBlind)} · hand #{s.handNumber}
@@ -162,6 +229,18 @@ export function TableView({
             Requests <b>{requestCount}</b>
           </button>
         )}
+        {onChat && (
+          <button
+            className="menu-pill chat-fab"
+            aria-label="Chat"
+            onClick={() => {
+              setShowChat(!showChat);
+              setChatSeenCount(chat?.length ?? 0);
+            }}
+          >
+            💬{!showChat && unreadChat > 0 && <span className="chat-dot" />}
+          </button>
+        )}
         <button className="menu-pill" onClick={() => setSheet("menu")} aria-label="Table menu">
           <span aria-hidden="true">☰</span> Table
         </button>
@@ -169,55 +248,89 @@ export function TableView({
 
       <div className="table-wrap">
         <div className="felt" />
-        <div className="table-brand">{s.dft ? "Double Flop" : "The Table"}</div>
+        <div className="table-brand">{isDft ? "Double Flop" : "The Table"}</div>
         {s.round && <div className="round-tag">{s.round}</div>}
-        {s.dft ? (
+        {isDft ? (
           <div className="dft-boards">
-            <div className="dft-board">
-              <span className="dft-board-tag">Board A</span>
-              <div className="dft-cards">
-                {s.dft.boards.a.map((c, i) => <CardFace key={`a${i}`} card={c} size="md" />)}
-              </div>
-            </div>
+            {boardRow("a", s.dft!.boards.a)}
             {s.totalPot > 0 && <div className="pot-line dft-pot">POT {fmt(s.totalPot)}</div>}
-            <div className="dft-board">
-              <span className="dft-board-tag">Board B</span>
-              <div className="dft-cards">
-                {s.dft.boards.b.map((c, i) => <CardFace key={`b${i}`} card={c} size="md" />)}
-              </div>
-            </div>
+            {boardRow("b", s.dft!.boards.b)}
           </div>
         ) : (
           <>
             <div className="board">
-              {s.communityCards.map((c, i) => <CardFace key={i} card={c} />)}
+              {s.communityCards.map((c, i) => <CardFace key={i} card={c} size={phone ? "sm" : "md"} delay={i * 90} />)}
             </div>
             {s.totalPot > 0 && <div className="pot-line">POT {fmt(s.totalPot)}</div>}
           </>
         )}
       </div>
 
-      {s.seats.map((v, i) => {
-        const p = seatPos(i, n);
-        const peeking = mode === "online" ? v.seat === mySeat : peekSeat === v.seat;
+      {s.seats.map((v) => {
+        const di = displayIndex(v.seat);
+        const p = seatPos(di, n, phone, s.variant);
+        const mine = v.seat === mySeat;
+        const peeking = mode === "online" ? mine : peekSeat === v.seat;
         // a spectator (not seated) may tap an empty seat to request it (item 2)
         const canRequest = mode === "online" && mySeat == null && !!v.empty && !!onRequestSeat;
+        const inDock = mine && !!dockCards; // my DFT seat lives in the dock
         return (
-          <Seat key={v.seat} view={v}
-            x={p.x} y={p.y} betX={p.bx} betY={p.by}
-            timerPct={v.isTurn ? timerPct : null}
-            peeking={peeking}
-            peekable={mode === "hotseat"}
-            offline={connectedIds && !v.empty ? !connectedIds.has(v.id) : false}
-            bubble={bubbleBySeatId.get(v.id) ?? null}
-            backCount={s.dft ? 6 : 2}
-            canRequest={canRequest}
-            onRequestSeat={() => onRequestSeat?.(v.seat)}
-            onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
-            winBadge={winBySeat.get(v.seat) ?? null}
-          />
+          <span key={v.seat}>
+            {!inDock && (
+              <Seat view={v}
+                x={p.x} y={p.y}
+                top={phone && (TOP_ROW[n] ?? []).includes(di)}
+                fan={!mine && !v.revealed}
+                timerPct={v.isTurn ? timerPct : null}
+                peeking={peeking}
+                peekable={mode === "hotseat"}
+                offline={connectedIds && !v.empty ? !connectedIds.has(v.id) : false}
+                bubble={bubbleBySeatId.get(v.id) ?? null}
+                backCount={isDft ? 6 : 2}
+                cardSize={mine && !isDft ? "md" : "xs"}
+                canRequest={canRequest}
+                onRequestSeat={() => onRequestSeat?.(v.seat)}
+                onPeek={() => setPeekSeat(peekSeat === v.seat ? null : v.seat)}
+                winBadge={winBySeat.get(v.seat) ?? null}
+              />
+            )}
+            <SeatExtras view={v} betX={p.bx} betY={p.by} />
+            {mine && !isDft && myNlheLabel && s.phase === "inHand" && !v.folded && (
+              <div className="my-hand-name" style={{ left: `${p.x}%`, top: `${p.y}%` }}>{myNlheLabel.name}</div>
+            )}
+          </span>
         );
       })}
+
+      {/* My six cards, always grouped (2.2) + live names (2.3) + rearranging (2.4).
+          The picking phase happens right here: timer + LOCK on the dock. */}
+      {dockCards && me && (
+        <HandDock
+          handNumber={s.handNumber}
+          holeCards={dockCards}
+          serverOrder={me.arrangement ?? null}
+          boards={s.dft!.boards}
+          editable={dockEditable}
+          locked={dockLocked}
+          picking={pk && iAmPicking ? {
+            deadlineAt: s.turnDeadlineAt, displayNow,
+            lockedCount: pk.lockedSeats.length, total: pk.seats.length,
+          } : null}
+          free={!showActionBar}
+          onDraft={(order) => onDraftArrangement?.(order)}
+          onLock={() => onSubmitArrangement?.(me.arrangement ?? [0, 1, 2, 3, 4, 5])}
+          onFocusBoard={setFocusBoard}
+        >
+          <Seat view={me} hideCards
+            timerPct={me.isTurn ? timerPct : null}
+            peeking peekable={false}
+            offline={false}
+            bubble={bubbleBySeatId.get(me.id) ?? null}
+            onPeek={() => {}}
+            winBadge={winBySeat.get(me.seat) ?? null}
+          />
+        </HandDock>
+      )}
 
       {canShow && (
         <button className="menu-pill show-btn" onClick={onShow}>Show winning cards</button>
@@ -225,51 +338,38 @@ export function TableView({
 
       {/* Seated players get the action bar; spectators never see disabled
           betting buttons (#4) — just the dealer log on wide screens. */}
-      {seated ? (
+      {showActionBar ? (
         <ActionBar state={s} enabled={myTurn}
           onAct={(a, amt) => { onAct(a, amt); setPeekSeat(null); }}
           onTimeBank={onTimeBank}
         />
-      ) : (
+      ) : !seated ? (
         <div className="spectator-strip"><LogStrip log={s.log} /></div>
-      )}
+      ) : null}
 
-      {/* Picking overlay: only a viewer who is actually picking sees it. An
-          active picker gets the interactive splitter; one who's locked in gets
-          a passive "waiting" veil; spectators + folded players see neither. */}
-      {s.dft && s.dft.subPhase === "picking" && s.dft.picking && iAmPicking && (
-        !iPickLocked && onSubmitArrangement && mode === "online" ? (
-          <DftPicking
-            key={s.handNumber}
-            holeCards={s.seats.find((x) => x.seat === mySeat)?.holeCards ?? null}
-            boards={s.dft.boards}
-            picking={s.dft.picking}
-            mySeat={mySeat}
-            initialOrder={s.seats.find((x) => x.seat === mySeat)?.arrangement ?? null}
-            deadlineAt={s.turnDeadlineAt}
-            displayNow={displayNow}
-            onSubmit={onSubmitArrangement}
-          />
-        ) : (
-          <div className="veil">
-            <div>
-              <div className="msg">Locked in ✓</div>
-              <div className="hint">Waiting for the others to choose their hands…</div>
-            </div>
-          </div>
-        )
+      {/* Picking phase, for everyone NOT picking: a quiet felt banner. Pickers
+          use the dock; nobody is ever stuck behind an overlay. */}
+      {pk && !iAmPicking && (
+        <div className="phase-banner">
+          Players are choosing their hands · {pk.lockedSeats.length}/{pk.seats.length} locked
+        </div>
       )}
 
       {/* Decisions overlay: only a viewer who still owes a run/surrender call. */}
-      {s.dft && s.dft.subPhase === "decisions" && s.dft.decisions && iOweDecision && onDeclare && mode === "online" && (
+      {dec && iOweDecision && onDeclare && mode === "online" && (
         <DftDecisions
           key={s.handNumber}
-          decisions={s.dft.decisions}
+          decisions={dec}
           mySeat={mySeat}
           deadlineAt={s.turnDeadlineAt}
           displayNow={displayNow}
           onDeclare={onDeclare}
         />
+      )}
+      {dec && !iOweDecision && (
+        <div className="phase-banner">
+          Run or surrender — blind calls in progress · {dec.lockedSeats.length}/{dec.contests.reduce((t, c) => t + c.seats.length, 0)} locked
+        </div>
       )}
 
       {/* Why the table can't deal (both modes) — item 1, so it's never silent. */}
@@ -277,10 +377,10 @@ export function TableView({
         <div className="waiting-banner">{s.waitingReason}</div>
       )}
 
-      {s.dft && s.phase === "handEnded" && s.dft.flips.length > 0 && (
+      {isDft && s.phase === "handEnded" && s.dft!.flips.length > 0 && (
         <DftReveal
           key={s.handNumber}
-          flips={s.dft.flips}
+          flips={s.dft!.flips}
           result={s.lastHandResult ?? []}
           nameOf={(seat) => s.seats.find((x) => x.seat === seat)?.name ?? `Seat ${seat + 1}`}
         />
@@ -302,18 +402,6 @@ export function TableView({
         </div>
       )}
 
-      {onChat && (
-        <button
-          className="chat-fab"
-          aria-label="Chat"
-          onClick={() => {
-            setShowChat(!showChat);
-            setChatSeenCount(chat?.length ?? 0);
-          }}
-        >
-          💬{!showChat && unreadChat > 0 && <span className="chat-dot" />}
-        </button>
-      )}
       {showChat && onChat && (
         <ChatPanel entries={chat ?? []} myId={myId ?? ""}
           onSend={onChat} onClose={() => { setShowChat(false); setChatSeenCount(chat?.length ?? 0); }} />

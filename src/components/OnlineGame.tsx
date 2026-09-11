@@ -176,6 +176,7 @@ export function OnlineGame({ room, myId, keyword, create, onExit }: Props) {
       onPause={isHost ? () => r.send.host({ kind: "pause" }) : undefined}
       onEnd={isHost ? () => r.send.host({ kind: "end" }) : undefined}
       onSetMode={isHost ? (mode) => r.send.host({ kind: "setGameMode", mode }) : undefined}
+      onDraftArrangement={(order) => r.send.draftArrangement(order)}
       onSubmitArrangement={(order) => r.send.submitArrangement(order)}
       onDeclare={(potIndex, decision) => r.send.declare(potIndex, decision)}
       onAddChips={isHost ? (id, amt) => r.send.host({ kind: "addChips", playerId: id, amount: amt }) : undefined}
